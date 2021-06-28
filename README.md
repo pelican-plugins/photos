@@ -1,10 +1,23 @@
-# Photos
+Photos: A Plugin for Pelican
+============================
+
+[![Build Status](https://img.shields.io/github/workflow/status/pelican-plugins/photos/build)](https://github.com/pelican-plugins/photos/actions)
+[![PyPI Version](https://img.shields.io/pypi/v/pelican-photos)](https://pypi.org/project/pelican-photos/)
+![License](https://img.shields.io/pypi/l/pelican-photos?color=blue)
 
 Use Photos to add a photo or a gallery of photos to an article, or to include photos in the body text. Photos are kept separately, as an organized library of high resolution photos, and resized as needed.
 
-## How to install and configure
+Installation
+------------
+
+This plugin can be installed via:
+
+    python -m pip install pelican-photos
 
 The plug-in requires `Pillow`: the Python Imaging Library and optionally `Piexif`, whose installation are outside the scope of this document.
+
+Usage
+-----
 
 The plug-in resizes the referred photos, and generates thumbnails for galleries and associated photos, based on the following configuration and default values:
 
@@ -289,3 +302,18 @@ Gallery
 
 Image_process
 :	Resize and process images in the article body in a more flexible way (based on the CSS class of the image), but without the ability to create galleries. The source photos must be kept with the source of the blog.
+
+Contributing
+------------
+
+Contributions are welcome and much appreciated. Every little bit helps. You can contribute by improving the documentation, adding missing features, and fixing bugs. You can also help out by reviewing and commenting on [existing issues][].
+
+ To start contributing to this plugin, review the [Contributing to Pelican][] documentation, beginning with the **Contributing Code** section.
+
+[existing issues]: https://github.com/pelican-plugins/photos/issues
+[Contributing to Pelican]: https://docs.getpelican.com/en/latest/contribute.html
+
+License
+-------
+
+This project is licensed under the AGPL-3.0 license.
