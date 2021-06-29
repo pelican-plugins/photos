@@ -1,1 +1,1 @@
-from .photos import *
+from .photos import *  # NOQA

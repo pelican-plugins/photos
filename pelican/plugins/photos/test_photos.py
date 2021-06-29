@@ -99,7 +99,9 @@ class TestPhotos(unittest.TestCase):
     def test_photo_article_body(self):
         expected = (
             "<p>Here is my best photo, again.</p>\n"
-            '<p><img alt="" src="http://getpelican.com/sub/photos/agallery/besta.jpg">.</p>'
+            "<p>"
+            '<img alt="" src="http://getpelican.com/sub/photos/agallery/besta.jpg">.'
+            "</p>"
         )
         self.assertEqual(expected, self.get_article("photo").content)
 

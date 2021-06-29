@@ -6,7 +6,6 @@ import multiprocessing
 import os
 import pprint
 import re
-import sys
 
 from pelican import signals
 from pelican.generators import ArticlesGenerator, PagesGenerator
@@ -269,8 +268,8 @@ def manipulate_exif(img, settings):
 
     if settings["PHOTO_EXIF_COPYRIGHT"]:
 
-        # We want to be minimally destructive to any preset exif author or copyright information.
-        # If there is copyright or author information prefer that over everything else.
+        # Be minimally destructive to any preset EXIF author or copyright information.
+        # If there is copyright or author information, prefer that over everything else.
         if not exif["0th"].get(piexif.ImageIFD.Artist):
             exif["0th"][piexif.ImageIFD.Artist] = settings[
                 "PHOTO_EXIF_COPYRIGHT_AUTHOR"
@@ -293,7 +292,7 @@ def resize_worker(orig, resized, spec, settings):
     ):  # Only works with JPEG exif for sure.
         try:
             im, exif_copy = manipulate_exif(im, settings)
-        except:
+        except Exception:
             logger.info(f"photos: no EXIF or EXIF error in {orig}")
             exif_copy = b""
     else:
@@ -480,7 +479,7 @@ def galleries_string_decompose(gallery_string):
     splitter_regex = re.compile(r"[\s,]*?({photo}|{filename})")
     title_regex = re.compile(r"{(.+)}")
     galleries = map(
-        unicode.strip if sys.version_info.major == 2 else str.strip,
+        str.strip,
         filter(None, splitter_regex.split(gallery_string)),
     )
     galleries = [
@@ -581,7 +580,7 @@ def process_gallery(generator, content, location):
                 )
 
             content.photo_gallery.append((title, content_gallery))
-            logger.debug(f"Gallery Data: ")
+            logger.debug(f"Gallery Data: {pprint.pformat(content.photo_gallery)}")
             DEFAULT_CONFIG["created_galleries"]["gallery"] = content_gallery
         else:
             logger.error(
