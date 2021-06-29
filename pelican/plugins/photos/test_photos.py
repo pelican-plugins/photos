@@ -28,6 +28,7 @@ class TestPhotos(unittest.TestCase):
         context = cls.settings.copy()
         context["generated_content"] = dict()
         context["static_links"] = set()
+        context["static_content"] = {}
         cls.generator = ArticlesGenerator(
             context=context,
             settings=cls.settings,
