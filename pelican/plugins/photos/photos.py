@@ -6,8 +6,10 @@ import multiprocessing
 import os
 import pprint
 import re
+from typing import Union
 
-from pelican import signals
+from pelican import Pelican, signals
+from pelican.contents import Article, Page
 from pelican.generators import ArticlesGenerator, PagesGenerator
 from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
@@ -29,7 +31,7 @@ else:
     logger.debug("piexif found.")
 
 
-def initialized(pelican):
+def initialized(pelican: Pelican):
     p = os.path.expanduser("~/Pictures")
 
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
@@ -507,94 +509,115 @@ def galleries_string_decompose(gallery_string):
         )
 
 
-def process_gallery(generator, content, location):
+def process_content_galleries(content: Union[Article, Page], location):
+    """
+    Process all galleries attached to an article or page.
+
+    :param content: The content object
+    :param location: Galleries
+    """
     content.photo_gallery = []
 
     galleries = galleries_string_decompose(location)
 
     for gallery in galleries:
-
         if gallery["location"] in DEFAULT_CONFIG["created_galleries"]:
             content.photo_gallery.append(
                 (gallery["location"], DEFAULT_CONFIG["created_galleries"][gallery])
             )
             continue
 
-        if gallery["type"] == "{photo}":
-            dir_gallery = os.path.join(
-                os.path.expanduser(generator.settings["PHOTO_LIBRARY"]),
-                gallery["location"],
+        gallery_info = process_gallery(content, gallery)
+        if gallery_info is None:
+            continue
+        content.photo_gallery.append(gallery_info)
+
+
+def process_gallery(content: Union[Article, Page], location_parsed):
+    """
+    Process a single gallery
+
+    - look for images
+    - read meta data
+    - read exif data
+    - enqueue the images to be processed
+    """
+    if location_parsed["type"] == "{photo}":
+        dir_gallery = os.path.join(
+            os.path.expanduser(content.settings["PHOTO_LIBRARY"]),
+            location_parsed["location"],
+        )
+        rel_gallery = location_parsed["location"]
+    elif location_parsed["type"] == "{filename}":
+        base_path = os.path.join(content.settings["PATH"], content.relative_dir)
+        dir_gallery = os.path.join(base_path, location_parsed["location"])
+        rel_gallery = os.path.join(content.relative_dir, location_parsed["location"])
+
+    if not os.path.isdir(dir_gallery):
+        logger.error(
+            "photos: Gallery does not exist: {} at {}".format(
+                location_parsed["location"], dir_gallery
             )
-            rel_gallery = gallery["location"]
-        elif gallery["type"] == "{filename}":
-            base_path = os.path.join(generator.path, content.relative_dir)
-            dir_gallery = os.path.join(base_path, gallery["location"])
-            rel_gallery = os.path.join(content.relative_dir, gallery["location"])
+        )
+        return None
 
-        if os.path.isdir(dir_gallery):
-            logger.info(f"photos: Gallery detected: {rel_gallery}")
-            dir_photo = os.path.join("photos", rel_gallery.lower())
-            dir_thumb = os.path.join("photos", rel_gallery.lower())
-            exifs = read_notes(
-                os.path.join(dir_gallery, "exif.txt"), msg="photos: No EXIF for gallery"
+    logger.info(f"photos: Gallery detected: {rel_gallery}")
+    dir_photo = os.path.join("photos", rel_gallery.lower())
+    dir_thumb = os.path.join("photos", rel_gallery.lower())
+    exifs = read_notes(
+        os.path.join(dir_gallery, "exif.txt"), msg="photos: No EXIF for gallery"
+    )
+    captions = read_notes(
+        os.path.join(dir_gallery, "captions.txt"),
+        msg="photos: No captions for gallery",
+    )
+    blacklist = read_notes(
+        os.path.join(dir_gallery, "blacklist.txt"),
+        msg="photos: No blacklist for gallery",
+    )
+    content_gallery = []
+
+    title = location_parsed["title"]
+    for pic in sorted(os.listdir(dir_gallery)):
+        if pic.startswith("."):
+            continue
+        if pic.endswith(".txt"):
+            continue
+        if pic in blacklist:
+            continue
+        photo = os.path.splitext(pic)[0].lower() + ".jpg"
+        thumb = os.path.splitext(pic)[0].lower() + "t.jpg"
+        content_gallery.append(
+            (
+                pic,
+                os.path.join(dir_photo, photo),
+                os.path.join(dir_thumb, thumb),
+                exifs.get(pic, ""),
+                captions.get(pic, ""),
             )
-            captions = read_notes(
-                os.path.join(dir_gallery, "captions.txt"),
-                msg="photos: No captions for gallery",
-            )
-            blacklist = read_notes(
-                os.path.join(dir_gallery, "blacklist.txt"),
-                msg="photos: No blacklist for gallery",
-            )
-            content_gallery = []
+        )
 
-            title = gallery["title"]
-            for pic in sorted(os.listdir(dir_gallery)):
-                if pic.startswith("."):
-                    continue
-                if pic.endswith(".txt"):
-                    continue
-                if pic in blacklist:
-                    continue
-                photo = os.path.splitext(pic)[0].lower() + ".jpg"
-                thumb = os.path.splitext(pic)[0].lower() + "t.jpg"
-                content_gallery.append(
-                    (
-                        pic,
-                        os.path.join(dir_photo, photo),
-                        os.path.join(dir_thumb, thumb),
-                        exifs.get(pic, ""),
-                        captions.get(pic, ""),
-                    )
-                )
+        enqueue_resize(
+            os.path.join(dir_gallery, pic),
+            os.path.join(dir_photo, photo),
+            content.settings["PHOTO_GALLERY"],
+        )
+        enqueue_resize(
+            os.path.join(dir_gallery, pic),
+            os.path.join(dir_thumb, thumb),
+            content.settings["PHOTO_THUMB"],
+        )
+    logger.debug(f"Gallery Data: {pprint.pformat(content.photo_gallery)}")
+    DEFAULT_CONFIG["created_galleries"]["gallery"] = content_gallery
 
-                enqueue_resize(
-                    os.path.join(dir_gallery, pic),
-                    os.path.join(dir_photo, photo),
-                    generator.settings["PHOTO_GALLERY"],
-                )
-                enqueue_resize(
-                    os.path.join(dir_gallery, pic),
-                    os.path.join(dir_thumb, thumb),
-                    generator.settings["PHOTO_THUMB"],
-                )
-
-            content.photo_gallery.append((title, content_gallery))
-            logger.debug(f"Gallery Data: {pprint.pformat(content.photo_gallery)}")
-            DEFAULT_CONFIG["created_galleries"]["gallery"] = content_gallery
-        else:
-            logger.error(
-                "photos: Gallery does not exist: {} at {}".format(
-                    gallery["location"], dir_gallery
-                )
-            )
+    return title, content_gallery
 
 
-def detect_gallery(generator, content):
+def detect_content_galleries(content: Union[Article, Page]):
     if "gallery" in content.metadata:
         gallery = content.metadata.get("gallery")
         if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
-            process_gallery(generator, content, gallery)
+            process_content_galleries(content, gallery)
         elif gallery:
             logger.error(f"photos: Gallery tag not recognized: {gallery}")
 
@@ -649,17 +672,19 @@ def detect_images_and_galleries(generators):
     """Runs generator on both pages and articles."""
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
+            article: Article
             for article in itertools.chain(
                 generator.articles, generator.translations, generator.drafts
             ):
                 detect_image(generator, article)
-                detect_gallery(generator, article)
+                detect_content_galleries(article)
         elif isinstance(generator, PagesGenerator):
+            page: Page
             for page in itertools.chain(
                 generator.pages, generator.translations, generator.hidden_pages
             ):
                 detect_image(generator, page)
-                detect_gallery(generator, page)
+                detect_content_galleries(page)
 
 
 def register():
