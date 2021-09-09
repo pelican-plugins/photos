@@ -87,6 +87,12 @@ def initialized(pelican: Pelican):
         pelican.settings.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
         pelican.settings.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
+        pelican.settings.setdefault("PHOTO_INLINE_GALLERY_ENABLED", False)
+        pelican.settings.setdefault(
+            "PHOTO_INLINE_GALLERY_PATTERN", r"gallery::(?P<gallery_name>[{}\w_-]+)"
+        )
+        pelican.settings.setdefault("PHOTO_INLINE_GALLERY_TEMPLATE", "inline_gallery")
+
 
 def read_notes(filename, msg=None):
     notes = {}
@@ -516,13 +522,13 @@ def process_content_galleries(content: Union[Article, Page], location):
     :param content: The content object
     :param location: Galleries
     """
-    content.photo_gallery = []
+    photo_galleries = []
 
     galleries = galleries_string_decompose(location)
 
     for gallery in galleries:
         if gallery["location"] in DEFAULT_CONFIG["created_galleries"]:
-            content.photo_gallery.append(
+            photo_galleries.append(
                 (gallery["location"], DEFAULT_CONFIG["created_galleries"][gallery])
             )
             continue
@@ -530,7 +536,8 @@ def process_content_galleries(content: Union[Article, Page], location):
         gallery_info = process_gallery(content, gallery)
         if gallery_info is None:
             continue
-        content.photo_gallery.append(gallery_info)
+        photo_galleries.append(gallery_info)
+    return photo_galleries
 
 
 def process_gallery(content: Union[Article, Page], location_parsed):
@@ -607,19 +614,45 @@ def process_gallery(content: Union[Article, Page], location_parsed):
             os.path.join(dir_thumb, thumb),
             content.settings["PHOTO_THUMB"],
         )
-    logger.debug(f"Gallery Data: {pprint.pformat(content.photo_gallery)}")
+    # logger.debug(f"Gallery Data: {pprint.pformat(content.photo_gallery)}")
     DEFAULT_CONFIG["created_galleries"]["gallery"] = content_gallery
 
     return title, content_gallery
 
 
-def detect_content_galleries(content: Union[Article, Page]):
+def detect_content_galleries(
+    generator: Union[ArticlesGenerator, PagesGenerator], content: Union[Article, Page]
+):
+    def replace_gallery_string(pattern_match):
+        photo_galleries = process_content_galleries(
+            content, pattern_match.group("gallery_name")
+        )
+        template = generator.get_template(
+            generator.settings["PHOTO_INLINE_GALLERY_TEMPLATE"]
+        )
+        template_values = {
+            "galleries": photo_galleries,
+        }
+        if isinstance(generator, ArticlesGenerator):
+            template_values["article"] = content
+        elif isinstance(generator, PagesGenerator):
+            template_values["page"] = content
+        return template.render(**template_values)
+
+    # print(content.content)
     if "gallery" in content.metadata:
         gallery = content.metadata.get("gallery")
         if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
-            process_content_galleries(content, gallery)
+            content.photo_gallery = process_content_galleries(content, gallery)
         elif gallery:
             logger.error(f"photos: Gallery tag not recognized: {gallery}")
+
+    if content.settings["PHOTO_INLINE_GALLERY_ENABLED"]:
+        content._content = re.sub(
+            content.settings["PHOTO_INLINE_GALLERY_PATTERN"],
+            replace_gallery_string,
+            content._content,
+        )
 
 
 def image_clipper(x):
@@ -677,14 +710,14 @@ def detect_images_and_galleries(generators):
                 generator.articles, generator.translations, generator.drafts
             ):
                 detect_image(generator, article)
-                detect_content_galleries(article)
+                detect_content_galleries(generator, article)
         elif isinstance(generator, PagesGenerator):
             page: Page
             for page in itertools.chain(
                 generator.pages, generator.translations, generator.hidden_pages
             ):
                 detect_image(generator, page)
-                detect_content_galleries(page)
+                detect_content_galleries(generator, page)
 
 
 def register():
