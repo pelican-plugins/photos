@@ -69,6 +69,23 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 `PHOTO_EXIF_COPYRIGHT_AUTHOR = 'Your Name Here'`
 : Adds an author name to the photo's exif and copyright statement. Defaults to `AUTHOR` value from the `pelicanconf.py`
 
+`PHOTO_INLINE_GALLERY_ENABLED`
+: Enable inline gallery processing. (Default: False)
+
+`PHOTO_INLINE_GALLERY_PATTERN`
+: The pattern to look for. The ```gallery_name``` is used to find the right gallery.
+
+Defaults:
+
+```python
+r"gallery::(?P<gallery_name>[{}\w_-]+)"
+```
+
+`PHOTO_INLINE_GALLERY_TEMPLATE`
+: Template to render the inline gallery.
+
+Default: ```"inline_gallery"```
+
 The plug-in automatically resizes the photos and publishes them to the following output folder:
 
     ./output/photos
