@@ -40,7 +40,7 @@ class TestPhotos(unittest.TestCase):
         cls.generator.generate_context()
         for article in cls.generator.articles:
             photos.detect_image(cls.generator, article)
-            photos.detect_content_galleries(article)
+            photos.detect_content_galleries(cls.generator, article)
 
     @classmethod
     def tearDownClass(cls):
