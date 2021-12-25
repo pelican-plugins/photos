@@ -89,7 +89,7 @@ def initialized(pelican: Pelican):
 
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_ENABLED", False)
         pelican.settings.setdefault(
-            "PHOTO_INLINE_GALLERY_PATTERN", r"gallery::(?P<gallery_name>[{}\w_-]+)"
+            "PHOTO_INLINE_GALLERY_PATTERN", r"gallery::(?P<gallery_name>[/{}\w_-]+)"
         )
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_TEMPLATE", "inline_gallery")
 

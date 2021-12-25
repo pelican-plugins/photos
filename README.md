@@ -78,7 +78,7 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 Defaults:
 
 ```python
-r"gallery::(?P<gallery_name>[{}\w_-]+)"
+r"gallery::(?P<gallery_name>[/{}\w_-]+)"
 ```
 
 `PHOTO_INLINE_GALLERY_TEMPLATE`
