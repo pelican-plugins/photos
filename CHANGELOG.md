@@ -1,6 +1,14 @@
 CHANGELOG
 =========
 
+1.1.0 - 2021-12-27
+------------------
+
+Add support for inline galleries.
+
+Contributed by [PhiBo](https://github.com/phibos) [PR #13](https://github.com/pelican-plugins/photos/pull/13/)
+
+
 1.0.1 - 2021-08-26
 ------------------
 
