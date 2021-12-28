@@ -300,6 +300,67 @@ class Image:
     def __str__(self):
         return self.web_filename
 
+    @staticmethod
+    def is_alpha(img):
+        return (
+            True
+            if img.mode in ("RGBA", "LA")
+            or (img.mode == "P" and "transparency" in img.info)
+            else False
+        )
+
+    def manipulate_exif(self, img):
+        try:
+            exif = piexif.load(img.info["exif"])
+        except Exception:
+            logger.debug("EXIF information not found")
+            exif = {}
+
+        if self._settings["PHOTO_EXIF_AUTOROTATE"]:
+            img, exif = self.rotate(img, exif)
+
+        if self._settings["PHOTO_EXIF_REMOVE_GPS"]:
+            exif.pop("GPS")
+
+        if self._settings["PHOTO_EXIF_COPYRIGHT"]:
+            # Be minimally destructive to any preset EXIF author or copyright
+            # information. If there is copyright or author information, prefer that
+            # over everything else.
+            if not exif["0th"].get(piexif.ImageIFD.Artist):
+                exif["0th"][piexif.ImageIFD.Artist] = self._settings[
+                    "PHOTO_EXIF_COPYRIGHT_AUTHOR"
+                ]
+                author = self._settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
+
+            if not exif["0th"].get(piexif.ImageIFD.Copyright):
+                license = build_license(self._settings["PHOTO_EXIF_COPYRIGHT"], author)
+                exif["0th"][piexif.ImageIFD.Copyright] = license
+
+        return img, piexif.dump(exif)
+
+    def reduce_opacity(self, im, opacity):
+        """Reduces Opacity.
+
+        Returns an image with reduced opacity.
+        Taken from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/362879
+        """
+        assert opacity >= 0 and opacity <= 1
+        if self.is_alpha(im):
+            im = im.copy()
+        else:
+            im = im.convert("RGBA")
+
+        alpha = im.split()[3]
+        alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
+        im.putalpha(alpha)
+        return im
+
+    @staticmethod
+    def remove_alpha(img, bg_color):
+        background = PIL.Image.new("RGB", img.size, bg_color)
+        background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
+        return background
+
     def resize(self, generator: pelican.generators.Generator):
         settings = generator.settings
         resized = os.path.join(generator.output_path, self.dst)
@@ -345,8 +406,8 @@ class Image:
         im.thumbnail((spec["width"], spec["height"]), PIL.Image.ANTIALIAS)
         directory = os.path.split(resized)[0]
 
-        if isalpha(im):
-            im = remove_alpha(im, settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
+        if self.is_alpha(im):
+            im = self.remove_alpha(im, settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
 
         if not os.path.exists(directory):
             try:
@@ -359,7 +420,7 @@ class Image:
         if settings["PHOTO_WATERMARK"]:
             isthumb = True if spec == settings["PHOTO_THUMB"] else False
             if not isthumb or (isthumb and settings["PHOTO_WATERMARK_THUMB"]):
-                im = watermark_photo(im, settings)
+                im = self.watermark(im)
 
         image_options = spec.get("options", {})
         im.save(
@@ -369,6 +430,87 @@ class Image:
             # exif=exif_copy,
             **image_options,
         )
+
+    @staticmethod
+    def rotate(img, exif_dict):
+        if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
+            orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
+            if orientation == 2:
+                img = img.transpose(PIL.Image.FLIP_LEFT_RIGHT)
+            elif orientation == 3:
+                img = img.rotate(180)
+            elif orientation == 4:
+                img = img.rotate(180).transpose(PIL.Image.FLIP_LEFT_RIGHT)
+            elif orientation == 5:
+                img = img.rotate(-90).transpose(PIL.Image.FLIP_LEFT_RIGHT)
+            elif orientation == 6:
+                img = img.rotate(-90, expand=True)
+            elif orientation == 7:
+                img = img.rotate(90).transpose(PIL.Image.FLIP_LEFT_RIGHT)
+            elif orientation == 8:
+                img = img.rotate(90)
+
+        return img, exif_dict
+
+    def watermark(self, image):
+        margin = [10, 10]
+        opacity = 0.6
+
+        watermark_layer = PIL.Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw_watermark = ImageDraw.Draw(watermark_layer)
+        text_reducer = 32
+        image_reducer = 8
+        text_size = [0, 0]
+        mark_size = [0, 0]
+        text_position = [0, 0]
+
+        if self._settings["PHOTO_WATERMARK_TEXT"]:
+            font_name = "SourceCodePro-Bold.otf"
+            default_font = os.path.join(DEFAULT_CONFIG["plugin_dir"], font_name)
+            font = ImageFont.FreeTypeFont(
+                default_font, watermark_layer.size[0] // text_reducer
+            )
+            text_size = draw_watermark.textsize(
+                self._settings["PHOTO_WATERMARK_TEXT"], font
+            )
+            text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
+            draw_watermark.text(
+                text_position,
+                self._settings["PHOTO_WATERMARK_TEXT"],
+                self._settings["PHOTO_WATERMARK_TEXT_COLOR"],
+                font=font,
+            )
+
+        if self._settings["PHOTO_WATERMARK_IMG"]:
+            mark_image = PIL.Image.open(self._settings["PHOTO_WATERMARK_IMG"])
+            mark_image_size = [
+                watermark_layer.size[0] // image_reducer for size in mark_size
+            ]
+            mark_image_size = (
+                self._settings["PHOTO_WATERMARK_IMG_SIZE"]
+                if self._settings["PHOTO_WATERMARK_IMG_SIZE"]
+                else mark_image_size
+            )
+            mark_image.thumbnail(mark_image_size, PIL.Image.ANTIALIAS)
+            mark_position = [
+                watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
+            ]
+            mark_position = tuple(
+                [
+                    mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
+                    mark_position[1] - text_size[1],
+                ]
+            )
+
+            if not self.is_alpha(mark_image):
+                mark_image = mark_image.convert("RGBA")
+
+            watermark_layer.paste(mark_image, mark_position, mark_image)
+
+        watermark_layer = self.reduce_opacity(watermark_layer, opacity)
+        image.paste(watermark_layer, (0, 0), watermark_layer)
+
+        return image
 
 
 def initialized(pelican: Pelican):
@@ -478,119 +620,6 @@ def enqueue_resize(img: Image) -> Image:
     return img
 
 
-def isalpha(img):
-    return (
-        True
-        if img.mode in ("RGBA", "LA")
-        or (img.mode == "P" and "transparency" in img.info)
-        else False
-    )
-
-
-def remove_alpha(img, bg_color):
-    background = Image.new("RGB", img.size, bg_color)
-    background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
-    return background
-
-
-def ReduceOpacity(im, opacity):
-    """Reduces Opacity.
-
-    Returns an image with reduced opacity.
-    Taken from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/362879
-    """
-    assert opacity >= 0 and opacity <= 1
-    if isalpha(im):
-        im = im.copy()
-    else:
-        im = im.convert("RGBA")
-
-    alpha = im.split()[3]
-    alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
-    im.putalpha(alpha)
-    return im
-
-
-def watermark_photo(image, settings):
-    margin = [10, 10]
-    opacity = 0.6
-
-    watermark_layer = PIL.Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw_watermark = ImageDraw.Draw(watermark_layer)
-    text_reducer = 32
-    image_reducer = 8
-    text_size = [0, 0]
-    mark_size = [0, 0]
-    text_position = [0, 0]
-
-    if settings["PHOTO_WATERMARK_TEXT"]:
-        font_name = "SourceCodePro-Bold.otf"
-        default_font = os.path.join(DEFAULT_CONFIG["plugin_dir"], font_name)
-        font = ImageFont.FreeTypeFont(
-            default_font, watermark_layer.size[0] // text_reducer
-        )
-        text_size = draw_watermark.textsize(settings["PHOTO_WATERMARK_TEXT"], font)
-        text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
-        draw_watermark.text(
-            text_position,
-            settings["PHOTO_WATERMARK_TEXT"],
-            settings["PHOTO_WATERMARK_TEXT_COLOR"],
-            font=font,
-        )
-
-    if settings["PHOTO_WATERMARK_IMG"]:
-        mark_image = PIL.Image.open(settings["PHOTO_WATERMARK_IMG"])
-        mark_image_size = [
-            watermark_layer.size[0] // image_reducer for size in mark_size
-        ]
-        mark_image_size = (
-            settings["PHOTO_WATERMARK_IMG_SIZE"]
-            if settings["PHOTO_WATERMARK_IMG_SIZE"]
-            else mark_image_size
-        )
-        mark_image.thumbnail(mark_image_size, PIL.Image.ANTIALIAS)
-        mark_position = [
-            watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
-        ]
-        mark_position = tuple(
-            [
-                mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
-                mark_position[1] - text_size[1],
-            ]
-        )
-
-        if not isalpha(mark_image):
-            mark_image = mark_image.convert("RGBA")
-
-        watermark_layer.paste(mark_image, mark_position, mark_image)
-
-    watermark_layer = ReduceOpacity(watermark_layer, opacity)
-    image.paste(watermark_layer, (0, 0), watermark_layer)
-
-    return image
-
-
-def rotate_image(img, exif_dict):
-    if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
-        orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
-        if orientation == 2:
-            img = img.transpose(PIL.Image.FLIP_LEFT_RIGHT)
-        elif orientation == 3:
-            img = img.rotate(180)
-        elif orientation == 4:
-            img = img.rotate(180).transpose(PIL.Image.FLIP_LEFT_RIGHT)
-        elif orientation == 5:
-            img = img.rotate(-90).transpose(PIL.Image.FLIP_LEFT_RIGHT)
-        elif orientation == 6:
-            img = img.rotate(-90, expand=True)
-        elif orientation == 7:
-            img = img.rotate(90).transpose(PIL.Image.FLIP_LEFT_RIGHT)
-        elif orientation == 8:
-            img = img.rotate(90)
-
-    return (img, exif_dict)
-
-
 def build_license(license, author):
     year = datetime.datetime.now().year
     license_file = os.path.join(DEFAULT_CONFIG["plugin_dir"], "licenses.json")
@@ -606,36 +635,6 @@ def build_license(license, author):
         return "Copyright {Year} {Author}, All Rights Reserved".format(
             Author=author, Year=year
         )
-
-
-def manipulate_exif(img, settings):
-    try:
-        exif = piexif.load(img.info["exif"])
-    except Exception:
-        logger.debug("EXIF information not found")
-        exif = {}
-
-    if settings["PHOTO_EXIF_AUTOROTATE"]:
-        img, exif = rotate_image(img, exif)
-
-    if settings["PHOTO_EXIF_REMOVE_GPS"]:
-        exif.pop("GPS")
-
-    if settings["PHOTO_EXIF_COPYRIGHT"]:
-
-        # Be minimally destructive to any preset EXIF author or copyright information.
-        # If there is copyright or author information, prefer that over everything else.
-        if not exif["0th"].get(piexif.ImageIFD.Artist):
-            exif["0th"][piexif.ImageIFD.Artist] = settings[
-                "PHOTO_EXIF_COPYRIGHT_AUTHOR"
-            ]
-            author = settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
-
-        if not exif["0th"].get(piexif.ImageIFD.Copyright):
-            license = build_license(settings["PHOTO_EXIF_COPYRIGHT"], author)
-            exif["0th"][piexif.ImageIFD.Copyright] = license
-
-    return (img, piexif.dump(exif))
 
 
 def resize_worker(img: Image, generator: pelican.generators.Generator):
