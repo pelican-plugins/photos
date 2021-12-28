@@ -9,9 +9,9 @@ import pprint
 import re
 from typing import Any, Dict, List, Union
 
-import pelican.generators
 from pelican import Pelican, signals
 from pelican.contents import Article, Page
+import pelican.generators
 from pelican.generators import ArticlesGenerator, PagesGenerator
 from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
@@ -19,8 +19,7 @@ from pelican.utils import pelican_open
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
-    import PIL
+    from PIL import Image as PILImage, ImageDraw, ImageEnhance, ImageFont, ImageOps
 except ImportError as e:
     logger.error("PIL/Pillow not found")
     raise e
@@ -357,7 +356,7 @@ class Image:
 
     @staticmethod
     def remove_alpha(img, bg_color):
-        background = PIL.Image.new("RGB", img.size, bg_color)
+        background = PILImage.new("RGB", img.size, bg_color)
         background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
         return background
 
@@ -376,7 +375,7 @@ class Image:
 
         logger.info(f"photos: make photo {orig} -> {output_filename}")
 
-        im = PIL.Image.open(orig)
+        im = PILImage.open(orig)
 
         if os.path.isfile(output_filename) and os.path.getmtime(
             orig
@@ -401,9 +400,9 @@ class Image:
         # icc_profile = im.info.get("icc_profile", None)
 
         if settings["PHOTO_SQUARE_THUMB"] and spec == settings["PHOTO_THUMB"]:
-            im = ImageOps.fit(im, (spec["width"], spec["height"]), PIL.Image.ANTIALIAS)
+            im = ImageOps.fit(im, (spec["width"], spec["height"]), PILImage.ANTIALIAS)
 
-        im.thumbnail((spec["width"], spec["height"]), PIL.Image.ANTIALIAS)
+        im.thumbnail((spec["width"], spec["height"]), PILImage.ANTIALIAS)
         directory = os.path.split(resized)[0]
 
         if self.is_alpha(im):
@@ -436,17 +435,17 @@ class Image:
         if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
             orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
             if orientation == 2:
-                img = img.transpose(PIL.Image.FLIP_LEFT_RIGHT)
+                img = img.transpose(PILImage.FLIP_LEFT_RIGHT)
             elif orientation == 3:
                 img = img.rotate(180)
             elif orientation == 4:
-                img = img.rotate(180).transpose(PIL.Image.FLIP_LEFT_RIGHT)
+                img = img.rotate(180).transpose(PILImage.FLIP_LEFT_RIGHT)
             elif orientation == 5:
-                img = img.rotate(-90).transpose(PIL.Image.FLIP_LEFT_RIGHT)
+                img = img.rotate(-90).transpose(PILImage.FLIP_LEFT_RIGHT)
             elif orientation == 6:
                 img = img.rotate(-90, expand=True)
             elif orientation == 7:
-                img = img.rotate(90).transpose(PIL.Image.FLIP_LEFT_RIGHT)
+                img = img.rotate(90).transpose(PILImage.FLIP_LEFT_RIGHT)
             elif orientation == 8:
                 img = img.rotate(90)
 
@@ -456,7 +455,7 @@ class Image:
         margin = [10, 10]
         opacity = 0.6
 
-        watermark_layer = PIL.Image.new("RGBA", image.size, (0, 0, 0, 0))
+        watermark_layer = PILImage.new("RGBA", image.size, (0, 0, 0, 0))
         draw_watermark = ImageDraw.Draw(watermark_layer)
         text_reducer = 32
         image_reducer = 8
@@ -482,7 +481,7 @@ class Image:
             )
 
         if self._settings["PHOTO_WATERMARK_IMG"]:
-            mark_image = PIL.Image.open(self._settings["PHOTO_WATERMARK_IMG"])
+            mark_image = PILImage.open(self._settings["PHOTO_WATERMARK_IMG"])
             mark_image_size = [
                 watermark_layer.size[0] // image_reducer for size in mark_size
             ]
@@ -491,7 +490,7 @@ class Image:
                 if self._settings["PHOTO_WATERMARK_IMG_SIZE"]
                 else mark_image_size
             )
-            mark_image.thumbnail(mark_image_size, PIL.Image.ANTIALIAS)
+            mark_image.thumbnail(mark_image_size, PILImage.ANTIALIAS)
             mark_position = [
                 watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
             ]
