@@ -7,7 +7,8 @@ import multiprocessing
 import os
 import pprint
 import re
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+import urllib.parse
 
 from pelican import Pelican, signals
 from pelican.contents import Article, Page
@@ -76,16 +77,16 @@ class ArticleImage:
         photo = os.path.splitext(image)[0].lower() + "a"
         thumb = os.path.splitext(image)[0].lower() + "t"
         img = Image(
-            specs=generator.settings["PHOTO_ARTICLE"],
             src=path,
             dst=os.path.join("photos", photo),
+            specs=generator.settings["PHOTO_ARTICLE"],
             settings=generator.settings,
         )
         self.image = enqueue_resize(img)
         img = Image(
-            specs=generator.settings["PHOTO_THUMB"],
             src=path,
             dst=os.path.join("photos", thumb),
+            specs=generator.settings["PHOTO_THUMB"],
             settings=generator.settings,
         )
         self.thumb = enqueue_resize(img)
@@ -116,9 +117,9 @@ class ContentImage:
             raise FileNotFound(f"No photo for {self._src_filename}")
 
         img = Image(
-            specs=settings["PHOTO_ARTICLE"],
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "a"),
+            specs=settings["PHOTO_ARTICLE"],
             settings=settings,
         )
         self.image = enqueue_resize(img)
@@ -144,17 +145,17 @@ class ContentImageLightbox:
             self.caption = captions.get(os.path.basename(self.filename))
 
         img = Image(
-            specs=settings["PHOTO_GALLERY"],
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower()),
+            specs=settings["PHOTO_GALLERY"],
             settings=settings,
         )
         self.image = enqueue_resize(img)
 
         img = Image(
-            specs=settings["PHOTO_THUMB"],
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "t"),
+            specs=settings["PHOTO_THUMB"],
             settings=settings,
         )
         self.thumb = enqueue_resize(img)
@@ -238,21 +239,21 @@ class GalleryImage:
         self.caption = self._gallery.captions.get(filename, "")
 
         img = Image(
-            specs=self._gallery.content.settings["PHOTO_GALLERY"],
             src=os.path.join(self._gallery.src_dir, self.filename),
             dst=os.path.join(
                 self._gallery.dst_dir, os.path.splitext(filename)[0].lower()
             ),
+            specs=self._gallery.content.settings["PHOTO_GALLERY"],
             settings=self._gallery.content.settings,
         )
         self.image = enqueue_resize(img)
 
         img = Image(
-            specs=self._gallery.content.settings["PHOTO_THUMB"],
             src=os.path.join(self._gallery.src_dir, self.filename),
             dst=os.path.join(
                 self._gallery.dst_dir, os.path.splitext(filename)[0].lower() + "t"
             ),
+            specs=self._gallery.content.settings["PHOTO_THUMB"],
             settings=self._gallery.content.settings,
         )
         self.thumb = enqueue_resize(img)
@@ -276,19 +277,34 @@ class GalleryImage:
 
 
 class Image:
-    def __init__(self, specs, src, dst, settings: Dict[str, Any]):
+    def __init__(
+        self,
+        src,
+        dst,
+        spec: Optional[Dict[str, Any]] = None,
+        specs: Optional[Dict[str, Dict[str, Any]]] = None,
+        settings: Optional[Dict[str, Any]] = None,
+    ):
+        self.spec = spec
         self.specs = specs
+        if self.spec is not None and self.specs is not None:
+            raise ValueError("Both spec and specs must not be provided")
         self.src = src
         self.dst = dst
         self._settings = settings
+        if self._settings is None:
+            self._settings = {}
 
         self.mimetype, _ = mimetypes.guess_type(self.src)
         _, _, image_type = self.mimetype.partition("/")
         self.type = image_type.lower()
 
-        self.spec = self.specs.get(image_type)
         if self.spec is None:
-            self.spec = self.specs["default"]
+            if self.specs is None:
+                raise ValueError("Only one of spec and specs must be provided")
+            self.spec = self.specs.get(image_type)
+            if self.spec is None:
+                self.spec = self.specs["default"]
 
         self.web_filename = "{resized}.{extension}".format(
             resized=self.dst,
@@ -296,6 +312,17 @@ class Image:
                 self.spec["type"].lower(), self.spec["type"].lower()
             ),
         )
+
+        srcset_specs: Optional[List, Tuple] = self.spec.get("srcset")
+        if not isinstance(srcset_specs, (list, tuple)):
+            srcset_specs = []
+
+        self.srcset = ImageSrcSet(settings=self._settings)
+        for srcset_spec in srcset_specs:
+            img = SrcSetImage(
+                src=self.src, dst=self.dst, spec=srcset_spec, settings=self._settings
+            )
+            self.srcset.append(enqueue_resize(img))
 
     def __str__(self):
         return self.web_filename
@@ -511,6 +538,45 @@ class Image:
         image.paste(watermark_layer, (0, 0), watermark_layer)
 
         return image
+
+
+class SrcSetImage(Image):
+    def __init__(
+        self,
+        src,
+        dst,
+        spec: Optional[Dict[str, Any]] = None,
+        settings: Optional[Dict[str, Any]] = None,
+    ):
+        self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
+
+        dst_suffix = spec.get("srcset_extension")
+        if dst_suffix is None:
+            dst_suffix = self.descriptor
+
+        dst = f"{dst}_{dst_suffix}"
+        super().__init__(src=src, dst=dst, spec=spec, settings=settings)
+
+
+class ImageSrcSet(list):
+    def __init__(self, settings):
+        super().__init__()
+        self._settings = settings
+
+    @property
+    def html_srcset(self):
+        items = []
+        img: SrcSetImage
+        for img in self:
+            items.append(
+                "{url} {descriptor}".format(
+                    url=urllib.parse.urljoin(
+                        self._settings["SITEURL"], img.web_filename
+                    ),
+                    descriptor=img.descriptor,
+                )
+            )
+        return ", ".join(items)
 
 
 def initialized(pelican: Pelican):
