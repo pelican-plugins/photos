@@ -19,7 +19,8 @@ from pelican.utils import pelican_open
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import Image as PILImage, ImageDraw, ImageEnhance, ImageFont, ImageOps
+    from PIL import Image as PILImage
+    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
 except ImportError as e:
     logger.error("PIL/Pillow not found")
     raise e
