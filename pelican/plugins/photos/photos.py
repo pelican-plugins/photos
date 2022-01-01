@@ -2,14 +2,17 @@ import datetime
 import itertools
 import json
 import logging
+import mimetypes
 import multiprocessing
 import os
 import pprint
 import re
-from typing import Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+import urllib.parse
 
 from pelican import Pelican, signals
 from pelican.contents import Article, Page
+import pelican.generators
 from pelican.generators import ArticlesGenerator, PagesGenerator
 from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
@@ -17,9 +20,11 @@ from pelican.utils import pelican_open
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
-except ImportError:
+    from PIL import Image as PILImage
+    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
+except ImportError as e:
     logger.error("PIL/Pillow not found")
+    raise e
 
 try:
     import piexif
@@ -29,6 +34,549 @@ except ImportError:
 else:
     ispiexif = True
     logger.debug("piexif found.")
+
+
+class InternalError(Exception):
+    pass
+
+
+class FileNotFound(Exception):
+    pass
+
+
+class GalleryNotFound(Exception):
+    pass
+
+
+class ArticleImage:
+    def __init__(
+        self,
+        content: pelican.contents.Content,
+        filename: str,
+        generator: pelican.generators.Generator,
+    ):
+        """
+        Images/photos on the top of an article or page.
+        """
+        self._filename = filename
+        if filename.startswith("{photo}"):
+            path = os.path.join(
+                os.path.expanduser(generator.settings["PHOTO_LIBRARY"]),
+                image_clipper(filename),
+            )
+            image = image_clipper(filename)
+        elif filename.startswith("{filename}"):
+            path = os.path.join(
+                generator.path, content.relative_dir, file_clipper(filename)
+            )
+            image = file_clipper(filename)
+
+        if not os.path.isfile(path):
+            raise FileNotFound(f"No photo for {content.source_path} at {path}")
+
+        photo = os.path.splitext(image)[0].lower() + "a"
+        thumb = os.path.splitext(image)[0].lower() + "t"
+        img = Image(
+            src=path,
+            dst=os.path.join("photos", photo),
+            specs=generator.settings["PHOTO_ARTICLE"],
+            settings=generator.settings,
+        )
+        self.image = enqueue_resize(img)
+        img = Image(
+            src=path,
+            dst=os.path.join("photos", thumb),
+            specs=generator.settings["PHOTO_THUMB"],
+            settings=generator.settings,
+        )
+        self.thumb = enqueue_resize(img)
+        self.file = os.path.basename(image).lower()
+
+    def __getitem__(self, index):
+        """
+        Legacy support
+        """
+        if index == 0:
+            return self.file
+        elif index == 1:
+            return self.image.web_filename
+        elif index == 2:
+            return self.thumb.web_filename
+        else:
+            raise IndexError
+
+
+class ContentImage:
+    def __init__(self, filename, settings: Dict[str, Any]):
+        self.filename = filename
+        self._src_filename = os.path.join(
+            os.path.expanduser(settings["PHOTO_LIBRARY"]), self.filename
+        )
+
+        if not os.path.isfile(self._src_filename):
+            raise FileNotFound(f"No photo for {self._src_filename}")
+
+        img = Image(
+            src=self._src_filename,
+            dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "a"),
+            specs=settings["PHOTO_ARTICLE"],
+            settings=settings,
+        )
+        self.image = enqueue_resize(img)
+
+
+class ContentImageLightbox:
+    def __init__(self, filename, settings: Dict[str, Any]):
+        self.filename = filename
+        self._src_filename = os.path.join(
+            os.path.expanduser(settings["PHOTO_LIBRARY"]), self.filename
+        )
+
+        if not os.path.isfile(self._src_filename):
+            raise FileNotFound(f"No photo for {self._src_filename}")
+
+        captions = read_notes(
+            os.path.join(os.path.dirname(filename), "captions.txt"),
+            msg="photos: No captions for gallery",
+        )
+
+        self.caption = None
+        if captions:
+            self.caption = captions.get(os.path.basename(self.filename))
+
+        img = Image(
+            src=self._src_filename,
+            dst=os.path.join("photos", os.path.splitext(filename)[0].lower()),
+            specs=settings["PHOTO_GALLERY"],
+            settings=settings,
+        )
+        self.image = enqueue_resize(img)
+
+        img = Image(
+            src=self._src_filename,
+            dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "t"),
+            specs=settings["PHOTO_THUMB"],
+            settings=settings,
+        )
+        self.thumb = enqueue_resize(img)
+
+
+class Gallery:
+    def __init__(self, content: Union[Article, Page], location_parsed):
+        """
+        Process a single gallery
+
+        - look for images
+        - read meta data
+        - read exif data
+        - enqueue the images to be processed
+        """
+        self.content = content
+
+        if location_parsed["type"] == "{photo}":
+            dir_gallery = os.path.join(
+                os.path.expanduser(content.settings["PHOTO_LIBRARY"]),
+                location_parsed["location"],
+            )
+            rel_gallery = location_parsed["location"]
+        elif location_parsed["type"] == "{filename}":
+            base_path = os.path.join(content.settings["PATH"], content.relative_dir)
+            dir_gallery = os.path.join(base_path, location_parsed["location"])
+            rel_gallery = os.path.join(
+                content.relative_dir, location_parsed["location"]
+            )
+
+        if not os.path.isdir(dir_gallery):
+            raise GalleryNotFound(
+                "Gallery does not exist: {} at {}".format(
+                    location_parsed["location"], dir_gallery
+                )
+            )
+
+        self.src_dir = dir_gallery
+
+        logger.info(f"photos: Gallery detected: {rel_gallery}")
+        self.dst_dir = os.path.join("photos", rel_gallery.lower())
+        self.exifs = read_notes(
+            os.path.join(dir_gallery, "exif.txt"), msg="photos: No EXIF for gallery"
+        )
+        self.captions = read_notes(
+            os.path.join(dir_gallery, "captions.txt"),
+            msg="photos: No captions for gallery",
+        )
+        blacklist = read_notes(
+            os.path.join(dir_gallery, "blacklist.txt"),
+            msg="photos: No blacklist for gallery",
+        )
+        self.images: List[GalleryImage] = []
+
+        self.title = location_parsed["title"]
+        for pic in sorted(os.listdir(dir_gallery)):
+            if pic.startswith("."):
+                continue
+            if pic.endswith(".txt"):
+                continue
+            if pic in blacklist:
+                continue
+
+            self.images.append(GalleryImage(filename=pic, gallery=self))
+
+    def __getitem__(self, item):
+        if item == 0:
+            return self.title
+        elif item == 1:
+            return self.images
+        else:
+            raise IndexError
+
+
+class GalleryImage:
+    def __init__(self, filename, gallery: Gallery):
+        self._gallery = gallery
+        self.filename = filename
+
+        self.exif = self._gallery.exifs.get(filename, "")
+        self.caption = self._gallery.captions.get(filename, "")
+
+        img = Image(
+            src=os.path.join(self._gallery.src_dir, self.filename),
+            dst=os.path.join(
+                self._gallery.dst_dir, os.path.splitext(filename)[0].lower()
+            ),
+            specs=self._gallery.content.settings["PHOTO_GALLERY"],
+            settings=self._gallery.content.settings,
+        )
+        self.image = enqueue_resize(img)
+
+        img = Image(
+            src=os.path.join(self._gallery.src_dir, self.filename),
+            dst=os.path.join(
+                self._gallery.dst_dir, os.path.splitext(filename)[0].lower() + "t"
+            ),
+            specs=self._gallery.content.settings["PHOTO_THUMB"],
+            settings=self._gallery.content.settings,
+        )
+        self.thumb = enqueue_resize(img)
+
+    def __getitem__(self, item):
+        """
+        Legacy support
+        """
+        if item == 0:
+            return self.filename
+        elif item == 1:
+            return self.image
+        elif item == 2:
+            return self.thumb
+        elif item == 3:
+            return self.exif
+        elif item == 4:
+            return self.caption
+
+        raise IndexError
+
+
+class Image:
+    def __init__(
+        self,
+        src,
+        dst,
+        spec: Optional[Dict[str, Any]] = None,
+        specs: Optional[Dict[str, Dict[str, Any]]] = None,
+        settings: Optional[Dict[str, Any]] = None,
+    ):
+        self.spec = spec
+        self.specs = specs
+        if self.spec is not None and self.specs is not None:
+            raise ValueError("Both spec and specs must not be provided")
+        self.src = src
+        self.dst = dst
+        self._settings = settings
+        if self._settings is None:
+            self._settings = {}
+
+        self.mimetype, _ = mimetypes.guess_type(self.src)
+        _, _, image_type = self.mimetype.partition("/")
+        self.type = image_type.lower()
+
+        if self.spec is None:
+            if self.specs is None:
+                raise ValueError("Only one of spec and specs must be provided")
+            self.spec = self.specs.get(image_type)
+            if self.spec is None:
+                self.spec = self.specs["default"]
+
+        self.web_filename = "{resized}.{extension}".format(
+            resized=self.dst,
+            extension=self._settings["PHOTO_FILE_EXTENSIONS"].get(
+                self.spec["type"].lower(), self.spec["type"].lower()
+            ),
+        )
+
+        srcset_specs: Optional[List, Tuple] = self.spec.get("srcset")
+        if not isinstance(srcset_specs, (list, tuple)):
+            srcset_specs = []
+
+        self.srcset = ImageSrcSet(settings=self._settings)
+        for srcset_spec in srcset_specs:
+            img = SrcSetImage(
+                src=self.src, dst=self.dst, spec=srcset_spec, settings=self._settings
+            )
+            self.srcset.append(enqueue_resize(img))
+
+    def __str__(self):
+        return self.web_filename
+
+    @staticmethod
+    def is_alpha(img):
+        return (
+            True
+            if img.mode in ("RGBA", "LA")
+            or (img.mode == "P" and "transparency" in img.info)
+            else False
+        )
+
+    def manipulate_exif(self, img):
+        try:
+            exif = piexif.load(img.info["exif"])
+        except Exception:
+            logger.debug("EXIF information not found")
+            exif = {}
+
+        if self._settings["PHOTO_EXIF_AUTOROTATE"]:
+            img, exif = self.rotate(img, exif)
+
+        if self._settings["PHOTO_EXIF_REMOVE_GPS"]:
+            exif.pop("GPS")
+
+        if self._settings["PHOTO_EXIF_COPYRIGHT"]:
+            # Be minimally destructive to any preset EXIF author or copyright
+            # information. If there is copyright or author information, prefer that
+            # over everything else.
+            if not exif["0th"].get(piexif.ImageIFD.Artist):
+                exif["0th"][piexif.ImageIFD.Artist] = self._settings[
+                    "PHOTO_EXIF_COPYRIGHT_AUTHOR"
+                ]
+                author = self._settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
+
+            if not exif["0th"].get(piexif.ImageIFD.Copyright):
+                license = build_license(self._settings["PHOTO_EXIF_COPYRIGHT"], author)
+                exif["0th"][piexif.ImageIFD.Copyright] = license
+
+        return img, piexif.dump(exif)
+
+    def reduce_opacity(self, im, opacity):
+        """Reduces Opacity.
+
+        Returns an image with reduced opacity.
+        Taken from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/362879
+        """
+        assert opacity >= 0 and opacity <= 1
+        if self.is_alpha(im):
+            im = im.copy()
+        else:
+            im = im.convert("RGBA")
+
+        alpha = im.split()[3]
+        alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
+        im.putalpha(alpha)
+        return im
+
+    @staticmethod
+    def remove_alpha(img, bg_color):
+        background = PILImage.new("RGB", img.size, bg_color)
+        background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
+        return background
+
+    def resize(self, generator: pelican.generators.Generator):
+        settings = generator.settings
+        resized = os.path.join(generator.output_path, self.dst)
+        orig = self.src
+        spec = self.spec
+
+        output_filename = "{resized}.{extension}".format(
+            resized=resized,
+            extension=settings["PHOTO_FILE_EXTENSIONS"].get(
+                spec["type"].lower(), spec["type"].lower()
+            ),
+        )
+
+        logger.info(f"photos: make photo {orig} -> {output_filename}")
+
+        im = PILImage.open(orig)
+
+        if os.path.isfile(output_filename) and os.path.getmtime(
+            orig
+        ) <= os.path.getmtime(output_filename):
+            logger.debug(
+                f"Skipping orig: {os.path.getmtime(orig)} "
+                f"{os.path.getmtime(output_filename)}"
+            )
+            return
+
+        # if (
+        #     ispiexif and settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
+        # ):  # Only works with JPEG exif for sure.
+        #     try:
+        #         im, exif_copy = manipulate_exif(im, settings)
+        #     except Exception:
+        #         logger.info(f"photos: no EXIF or EXIF error in {orig}")
+        #         exif_copy = b""
+        # else:
+        #     exif_copy = b""
+        #
+        # icc_profile = im.info.get("icc_profile", None)
+
+        if settings["PHOTO_SQUARE_THUMB"] and spec == settings["PHOTO_THUMB"]:
+            im = ImageOps.fit(im, (spec["width"], spec["height"]), PILImage.ANTIALIAS)
+
+        im.thumbnail((spec["width"], spec["height"]), PILImage.ANTIALIAS)
+        directory = os.path.split(resized)[0]
+
+        if self.is_alpha(im):
+            im = self.remove_alpha(im, settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
+
+        if not os.path.exists(directory):
+            try:
+                os.makedirs(directory)
+            except Exception:
+                logger.exception(f"Could not create {directory}")
+        else:
+            logger.debug(f"Directory already exists at {os.path.split(resized)[0]}")
+
+        if settings["PHOTO_WATERMARK"]:
+            isthumb = True if spec == settings["PHOTO_THUMB"] else False
+            if not isthumb or (isthumb and settings["PHOTO_WATERMARK_THUMB"]):
+                im = self.watermark(im)
+
+        image_options = spec.get("options", {})
+        im.save(
+            output_filename,
+            spec["type"],
+            # icc_profile=icc_profile,
+            # exif=exif_copy,
+            **image_options,
+        )
+
+    @staticmethod
+    def rotate(img, exif_dict):
+        if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
+            orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
+            if orientation == 2:
+                img = img.transpose(PILImage.FLIP_LEFT_RIGHT)
+            elif orientation == 3:
+                img = img.rotate(180)
+            elif orientation == 4:
+                img = img.rotate(180).transpose(PILImage.FLIP_LEFT_RIGHT)
+            elif orientation == 5:
+                img = img.rotate(-90).transpose(PILImage.FLIP_LEFT_RIGHT)
+            elif orientation == 6:
+                img = img.rotate(-90, expand=True)
+            elif orientation == 7:
+                img = img.rotate(90).transpose(PILImage.FLIP_LEFT_RIGHT)
+            elif orientation == 8:
+                img = img.rotate(90)
+
+        return img, exif_dict
+
+    def watermark(self, image):
+        margin = [10, 10]
+        opacity = 0.6
+
+        watermark_layer = PILImage.new("RGBA", image.size, (0, 0, 0, 0))
+        draw_watermark = ImageDraw.Draw(watermark_layer)
+        text_reducer = 32
+        image_reducer = 8
+        text_size = [0, 0]
+        mark_size = [0, 0]
+        text_position = [0, 0]
+
+        if self._settings["PHOTO_WATERMARK_TEXT"]:
+            font_name = "SourceCodePro-Bold.otf"
+            default_font = os.path.join(DEFAULT_CONFIG["plugin_dir"], font_name)
+            font = ImageFont.FreeTypeFont(
+                default_font, watermark_layer.size[0] // text_reducer
+            )
+            text_size = draw_watermark.textsize(
+                self._settings["PHOTO_WATERMARK_TEXT"], font
+            )
+            text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
+            draw_watermark.text(
+                text_position,
+                self._settings["PHOTO_WATERMARK_TEXT"],
+                self._settings["PHOTO_WATERMARK_TEXT_COLOR"],
+                font=font,
+            )
+
+        if self._settings["PHOTO_WATERMARK_IMG"]:
+            mark_image = PILImage.open(self._settings["PHOTO_WATERMARK_IMG"])
+            mark_image_size = [
+                watermark_layer.size[0] // image_reducer for size in mark_size
+            ]
+            mark_image_size = (
+                self._settings["PHOTO_WATERMARK_IMG_SIZE"]
+                if self._settings["PHOTO_WATERMARK_IMG_SIZE"]
+                else mark_image_size
+            )
+            mark_image.thumbnail(mark_image_size, PILImage.ANTIALIAS)
+            mark_position = [
+                watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
+            ]
+            mark_position = tuple(
+                [
+                    mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
+                    mark_position[1] - text_size[1],
+                ]
+            )
+
+            if not self.is_alpha(mark_image):
+                mark_image = mark_image.convert("RGBA")
+
+            watermark_layer.paste(mark_image, mark_position, mark_image)
+
+        watermark_layer = self.reduce_opacity(watermark_layer, opacity)
+        image.paste(watermark_layer, (0, 0), watermark_layer)
+
+        return image
+
+
+class SrcSetImage(Image):
+    def __init__(
+        self,
+        src,
+        dst,
+        spec: Optional[Dict[str, Any]] = None,
+        settings: Optional[Dict[str, Any]] = None,
+    ):
+        self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
+
+        dst_suffix = spec.get("srcset_extension")
+        if dst_suffix is None:
+            dst_suffix = self.descriptor
+
+        dst = f"{dst}_{dst_suffix}"
+        super().__init__(src=src, dst=dst, spec=spec, settings=settings)
+
+
+class ImageSrcSet(list):
+    def __init__(self, settings):
+        super().__init__()
+        self._settings = settings
+
+    @property
+    def html_srcset(self):
+        items = []
+        img: SrcSetImage
+        for img in self:
+            items.append(
+                "{url} {descriptor}".format(
+                    url=urllib.parse.urljoin(
+                        self._settings["SITEURL"], img.web_filename
+                    ),
+                    descriptor=img.descriptor,
+                )
+            )
+        return ", ".join(items)
 
 
 def initialized(pelican: Pelican):
@@ -84,6 +632,9 @@ def initialized(pelican: Pelican):
         pelican.settings.setdefault(
             "PHOTO_EXIF_COPYRIGHT_AUTHOR", pelican.settings["AUTHOR"]
         )
+        pelican.settings.setdefault(
+            "PHOTO_FILE_EXTENSIONS", {"jpeg": "jpg", "webp": "webp"}
+        )
         pelican.settings.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
         pelican.settings.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
@@ -116,132 +667,23 @@ def read_notes(filename, msg=None):
     return notes
 
 
-def enqueue_resize(orig, resized, spec=(640, 480, 80)):
-    if resized not in DEFAULT_CONFIG["queue_resize"]:
-        DEFAULT_CONFIG["queue_resize"][resized] = (orig, spec)
-    elif DEFAULT_CONFIG["queue_resize"][resized] != (orig, spec):
-        logger.error(
-            "photos: resize conflict for {}, {}-{} is not {}-{}".format(
-                resized,
-                DEFAULT_CONFIG["queue_resize"][resized][0],
-                DEFAULT_CONFIG["queue_resize"][resized][1],
-                orig,
-                spec,
+def enqueue_resize(img: Image) -> Image:
+    if img.dst not in DEFAULT_CONFIG["queue_resize"]:
+        DEFAULT_CONFIG["queue_resize"][img.dst] = img
+    elif (
+        DEFAULT_CONFIG["queue_resize"][img.dst].src != img.src
+        or DEFAULT_CONFIG["queue_resize"][img.dst].specs != img.specs
+    ):
+        raise InternalError(
+            "resize conflict for {}, {}-{} is not {}-{}".format(
+                img.dst,
+                DEFAULT_CONFIG["queue_resize"][img.dst].src,
+                DEFAULT_CONFIG["queue_resize"][img.dst].specs,
+                img.src,
+                img.specs,
             )
         )
-
-
-def isalpha(img):
-    return (
-        True
-        if img.mode in ("RGBA", "LA")
-        or (img.mode == "P" and "transparency" in img.info)
-        else False
-    )
-
-
-def remove_alpha(img, bg_color):
-    background = Image.new("RGB", img.size, bg_color)
-    background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
-    return background
-
-
-def ReduceOpacity(im, opacity):
-    """Reduces Opacity.
-
-    Returns an image with reduced opacity.
-    Taken from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/362879
-    """
-    assert opacity >= 0 and opacity <= 1
-    if isalpha(im):
-        im = im.copy()
-    else:
-        im = im.convert("RGBA")
-
-    alpha = im.split()[3]
-    alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
-    im.putalpha(alpha)
-    return im
-
-
-def watermark_photo(image, settings):
-    margin = [10, 10]
-    opacity = 0.6
-
-    watermark_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw_watermark = ImageDraw.Draw(watermark_layer)
-    text_reducer = 32
-    image_reducer = 8
-    text_size = [0, 0]
-    mark_size = [0, 0]
-    text_position = [0, 0]
-
-    if settings["PHOTO_WATERMARK_TEXT"]:
-        font_name = "SourceCodePro-Bold.otf"
-        default_font = os.path.join(DEFAULT_CONFIG["plugin_dir"], font_name)
-        font = ImageFont.FreeTypeFont(
-            default_font, watermark_layer.size[0] // text_reducer
-        )
-        text_size = draw_watermark.textsize(settings["PHOTO_WATERMARK_TEXT"], font)
-        text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
-        draw_watermark.text(
-            text_position,
-            settings["PHOTO_WATERMARK_TEXT"],
-            settings["PHOTO_WATERMARK_TEXT_COLOR"],
-            font=font,
-        )
-
-    if settings["PHOTO_WATERMARK_IMG"]:
-        mark_image = Image.open(settings["PHOTO_WATERMARK_IMG"])
-        mark_image_size = [
-            watermark_layer.size[0] // image_reducer for size in mark_size
-        ]
-        mark_image_size = (
-            settings["PHOTO_WATERMARK_IMG_SIZE"]
-            if settings["PHOTO_WATERMARK_IMG_SIZE"]
-            else mark_image_size
-        )
-        mark_image.thumbnail(mark_image_size, Image.ANTIALIAS)
-        mark_position = [
-            watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
-        ]
-        mark_position = tuple(
-            [
-                mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
-                mark_position[1] - text_size[1],
-            ]
-        )
-
-        if not isalpha(mark_image):
-            mark_image = mark_image.convert("RGBA")
-
-        watermark_layer.paste(mark_image, mark_position, mark_image)
-
-    watermark_layer = ReduceOpacity(watermark_layer, opacity)
-    image.paste(watermark_layer, (0, 0), watermark_layer)
-
-    return image
-
-
-def rotate_image(img, exif_dict):
-    if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
-        orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
-        if orientation == 2:
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
-        elif orientation == 3:
-            img = img.rotate(180)
-        elif orientation == 4:
-            img = img.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
-        elif orientation == 5:
-            img = img.rotate(-90).transpose(Image.FLIP_LEFT_RIGHT)
-        elif orientation == 6:
-            img = img.rotate(-90, expand=True)
-        elif orientation == 7:
-            img = img.rotate(90).transpose(Image.FLIP_LEFT_RIGHT)
-        elif orientation == 8:
-            img = img.rotate(90)
-
-    return (img, exif_dict)
+    return img
 
 
 def build_license(license, author):
@@ -261,76 +703,8 @@ def build_license(license, author):
         )
 
 
-def manipulate_exif(img, settings):
-    try:
-        exif = piexif.load(img.info["exif"])
-    except Exception:
-        logger.debug("EXIF information not found")
-        exif = {}
-
-    if settings["PHOTO_EXIF_AUTOROTATE"]:
-        img, exif = rotate_image(img, exif)
-
-    if settings["PHOTO_EXIF_REMOVE_GPS"]:
-        exif.pop("GPS")
-
-    if settings["PHOTO_EXIF_COPYRIGHT"]:
-
-        # Be minimally destructive to any preset EXIF author or copyright information.
-        # If there is copyright or author information, prefer that over everything else.
-        if not exif["0th"].get(piexif.ImageIFD.Artist):
-            exif["0th"][piexif.ImageIFD.Artist] = settings[
-                "PHOTO_EXIF_COPYRIGHT_AUTHOR"
-            ]
-            author = settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
-
-        if not exif["0th"].get(piexif.ImageIFD.Copyright):
-            license = build_license(settings["PHOTO_EXIF_COPYRIGHT"], author)
-            exif["0th"][piexif.ImageIFD.Copyright] = license
-
-    return (img, piexif.dump(exif))
-
-
-def resize_worker(orig, resized, spec, settings):
-    logger.info(f"photos: make photo {orig} -> {resized}")
-    im = Image.open(orig)
-
-    if (
-        ispiexif and settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
-    ):  # Only works with JPEG exif for sure.
-        try:
-            im, exif_copy = manipulate_exif(im, settings)
-        except Exception:
-            logger.info(f"photos: no EXIF or EXIF error in {orig}")
-            exif_copy = b""
-    else:
-        exif_copy = b""
-
-    icc_profile = im.info.get("icc_profile", None)
-
-    if settings["PHOTO_SQUARE_THUMB"] and spec == settings["PHOTO_THUMB"]:
-        im = ImageOps.fit(im, (spec[0], spec[1]), Image.ANTIALIAS)
-
-    im.thumbnail((spec[0], spec[1]), Image.ANTIALIAS)
-    directory = os.path.split(resized)[0]
-
-    if isalpha(im):
-        im = remove_alpha(im, settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
-
-    if not os.path.exists(directory):
-        try:
-            os.makedirs(directory)
-        except Exception:
-            logger.exception(f"Could not create {directory}")
-    else:
-        logger.debug(f"Directory already exists at {os.path.split(resized)[0]}")
-
-    if settings["PHOTO_WATERMARK"]:
-        isthumb = True if spec == settings["PHOTO_THUMB"] else False
-        if not isthumb or (isthumb and settings["PHOTO_WATERMARK_THUMB"]):
-            im = watermark_photo(im, settings)
-
-    im.save(resized, "JPEG", quality=spec[2], icc_profile=icc_profile, exif=exif_copy)
+def resize_worker(img: Image, generator: pelican.generators.Generator):
+    img.resize(generator)
 
 
 def resize_photos(generator, writer):
@@ -342,18 +716,11 @@ def resize_photos(generator, writer):
 
     pool = multiprocessing.Pool(generator.settings["PHOTO_RESIZE_JOBS"])
     logger.debug(f"Debug Status: {debug}")
-    for resized, what in DEFAULT_CONFIG["queue_resize"].items():
-        resized = os.path.join(generator.output_path, resized)
-        orig, spec = what
-        if not os.path.isfile(resized) or os.path.getmtime(orig) > os.path.getmtime(
-            resized
-        ):
-            if debug:
-                resize_worker(orig, resized, spec, generator.settings)
-            else:
-                pool.apply_async(
-                    resize_worker, (orig, resized, spec, generator.settings)
-                )
+    for img in DEFAULT_CONFIG["queue_resize"].values():
+        if debug:
+            resize_worker(img, generator)
+        else:
+            pool.apply_async(resize_worker, (img, generator))
 
     pool.close()
     pool.join()
@@ -368,95 +735,77 @@ def detect_content(content):
         tag = m.group("tag")
         output = m.group(0)
 
-        if what in ("photo", "lightbox"):
-            if value.startswith("/"):
-                value = value[1:]
+        if what not in ("photo", "lightbox"):
+            # ToDo: Log unsupported type
+            return output
 
-            path = os.path.join(os.path.expanduser(settings["PHOTO_LIBRARY"]), value)
+        if value.startswith("/"):
+            value = value[1:]
 
-            if os.path.isfile(path):
-                photo_prefix = os.path.splitext(value)[0].lower()
+        if what == "photo":
+            try:
+                img = ContentImage(filename=value, settings=settings)
+            except FileNotFound as e:
+                logger.error(f"photos: {str(e)}")
+                return output
 
-                if what == "photo":
-                    photo_article = photo_prefix + "a.jpg"
-                    enqueue_resize(
-                        path,
-                        os.path.join("photos", photo_article),
-                        settings["PHOTO_ARTICLE"],
+            return "".join(
+                (
+                    "<",
+                    m.group("tag"),
+                    m.group("attrs_before"),
+                    m.group("src"),
+                    "=",
+                    m.group("quote"),
+                    os.path.join(settings["SITEURL"], img.image.web_filename),
+                    m.group("quote"),
+                    m.group("attrs_after"),
+                )
+            )
+
+        elif what == "lightbox" and tag == "img":
+            try:
+                img = ContentImageLightbox(filename=value, settings=settings)
+            except FileNotFound as e:
+                logger.error(f"photos: {str(e)}")
+                return output
+
+            lightbox_attr_list = [""]
+
+            gallery_name = value.split("/")[0]
+            lightbox_attr_list.append(
+                '{}="{}"'.format(settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name)
+            )
+
+            if img.caption:
+                lightbox_attr_list.append(
+                    '{}="{}"'.format(
+                        settings["PHOTO_LIGHTBOX_CAPTION_ATTR"], img.caption
                     )
+                )
 
-                    output = "".join(
-                        (
-                            "<",
-                            m.group("tag"),
-                            m.group("attrs_before"),
-                            m.group("src"),
-                            "=",
-                            m.group("quote"),
-                            os.path.join(settings["SITEURL"], "photos", photo_article),
-                            m.group("quote"),
-                            m.group("attrs_after"),
-                        )
-                    )
+            lightbox_attrs = " ".join(lightbox_attr_list)
 
-                elif what == "lightbox" and tag == "img":
-                    photo_gallery = photo_prefix + ".jpg"
-                    enqueue_resize(
-                        path,
-                        os.path.join("photos", photo_gallery),
-                        settings["PHOTO_GALLERY"],
-                    )
+            return "".join(
+                (
+                    "<a href=",
+                    m.group("quote"),
+                    os.path.join(settings["SITEURL"], img.image.web_filename),
+                    m.group("quote"),
+                    lightbox_attrs,
+                    "><img",
+                    m.group("attrs_before"),
+                    "src=",
+                    m.group("quote"),
+                    os.path.join(settings["SITEURL"], img.thumb.web_filename),
+                    m.group("quote"),
+                    m.group("attrs_after"),
+                    "</a>",
+                )
+            )
 
-                    photo_thumb = photo_prefix + "t.jpg"
-                    enqueue_resize(
-                        path,
-                        os.path.join("photos", photo_thumb),
-                        settings["PHOTO_THUMB"],
-                    )
-
-                    lightbox_attr_list = [""]
-
-                    gallery_name = value.split("/")[0]
-                    lightbox_attr_list.append(
-                        '{}="{}"'.format(
-                            settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name
-                        )
-                    )
-
-                    captions = read_notes(
-                        os.path.join(os.path.dirname(path), "captions.txt"),
-                        msg="photos: No captions for gallery",
-                    )
-                    caption = captions.get(os.path.basename(path)) if captions else None
-                    if caption:
-                        lightbox_attr_list.append(
-                            '{}="{}"'.format(
-                                settings["PHOTO_LIGHTBOX_CAPTION_ATTR"], caption
-                            )
-                        )
-
-                    lightbox_attrs = " ".join(lightbox_attr_list)
-
-                    output = "".join(
-                        (
-                            "<a href=",
-                            m.group("quote"),
-                            os.path.join(settings["SITEURL"], "photos", photo_gallery),
-                            m.group("quote"),
-                            lightbox_attrs,
-                            "><img",
-                            m.group("attrs_before"),
-                            "src=",
-                            m.group("quote"),
-                            os.path.join(settings["SITEURL"], "photos", photo_thumb),
-                            m.group("quote"),
-                            m.group("attrs_after"),
-                            "</a>",
-                        )
-                    )
-
-            else:
-                logger.error("photos: No photo %s", path)
+        # else:
+        #  logger.error("photos: No photo %s", value)
 
         return output
 
@@ -527,97 +876,13 @@ def process_content_galleries(content: Union[Article, Page], location):
     galleries = galleries_string_decompose(location)
 
     for gallery in galleries:
-        if gallery["location"] in DEFAULT_CONFIG["created_galleries"]:
-            photo_galleries.append(
-                (gallery["location"], DEFAULT_CONFIG["created_galleries"][gallery])
-            )
-            continue
+        try:
+            gallery = Gallery(content, gallery)
+        except GalleryNotFound as e:
+            logger.error(f"photos: {str(e)}")
 
-        gallery_info = process_gallery(content, gallery)
-        if gallery_info is None:
-            continue
-        photo_galleries.append(gallery_info)
+        photo_galleries.append(gallery)
     return photo_galleries
-
-
-def process_gallery(content: Union[Article, Page], location_parsed):
-    """
-    Process a single gallery
-
-    - look for images
-    - read meta data
-    - read exif data
-    - enqueue the images to be processed
-    """
-    if location_parsed["type"] == "{photo}":
-        dir_gallery = os.path.join(
-            os.path.expanduser(content.settings["PHOTO_LIBRARY"]),
-            location_parsed["location"],
-        )
-        rel_gallery = location_parsed["location"]
-    elif location_parsed["type"] == "{filename}":
-        base_path = os.path.join(content.settings["PATH"], content.relative_dir)
-        dir_gallery = os.path.join(base_path, location_parsed["location"])
-        rel_gallery = os.path.join(content.relative_dir, location_parsed["location"])
-
-    if not os.path.isdir(dir_gallery):
-        logger.error(
-            "photos: Gallery does not exist: {} at {}".format(
-                location_parsed["location"], dir_gallery
-            )
-        )
-        return None
-
-    logger.info(f"photos: Gallery detected: {rel_gallery}")
-    dir_photo = os.path.join("photos", rel_gallery.lower())
-    dir_thumb = os.path.join("photos", rel_gallery.lower())
-    exifs = read_notes(
-        os.path.join(dir_gallery, "exif.txt"), msg="photos: No EXIF for gallery"
-    )
-    captions = read_notes(
-        os.path.join(dir_gallery, "captions.txt"),
-        msg="photos: No captions for gallery",
-    )
-    blacklist = read_notes(
-        os.path.join(dir_gallery, "blacklist.txt"),
-        msg="photos: No blacklist for gallery",
-    )
-    content_gallery = []
-
-    title = location_parsed["title"]
-    for pic in sorted(os.listdir(dir_gallery)):
-        if pic.startswith("."):
-            continue
-        if pic.endswith(".txt"):
-            continue
-        if pic in blacklist:
-            continue
-        photo = os.path.splitext(pic)[0].lower() + ".jpg"
-        thumb = os.path.splitext(pic)[0].lower() + "t.jpg"
-        content_gallery.append(
-            (
-                pic,
-                os.path.join(dir_photo, photo),
-                os.path.join(dir_thumb, thumb),
-                exifs.get(pic, ""),
-                captions.get(pic, ""),
-            )
-        )
-
-        enqueue_resize(
-            os.path.join(dir_gallery, pic),
-            os.path.join(dir_photo, photo),
-            content.settings["PHOTO_GALLERY"],
-        )
-        enqueue_resize(
-            os.path.join(dir_gallery, pic),
-            os.path.join(dir_thumb, thumb),
-            content.settings["PHOTO_THUMB"],
-        )
-    # logger.debug(f"Gallery Data: {pprint.pformat(content.photo_gallery)}")
-    DEFAULT_CONFIG["created_galleries"]["gallery"] = content_gallery
-
-    return title, content_gallery
 
 
 def detect_content_galleries(
@@ -663,33 +928,28 @@ def file_clipper(x):
     return x[11:] if x[10] == "/" else x[10:]
 
 
-def process_image(generator, content, image):
-    if image.startswith("{photo}"):
-        path = os.path.join(
-            os.path.expanduser(generator.settings["PHOTO_LIBRARY"]),
-            image_clipper(image),
-        )
-        image = image_clipper(image)
-    elif image.startswith("{filename}"):
-        path = os.path.join(generator.path, content.relative_dir, file_clipper(image))
-        image = file_clipper(image)
+def prepare_config(generator: pelican.generators.Generator):
+    settings = generator.settings
+    for name in ("PHOTO_ARTICLE", "PHOTO_GALLERY", "PHOTO_THUMB"):
+        if isinstance(settings[name], (list, tuple)):
+            logger.info(f"Converting legacy config to new values: {name}")
+            settings[name] = {
+                "default": {
+                    "width": settings[name][0],
+                    "height": settings[name][1],
+                    "type": "jpeg",
+                    "options": {"quality": settings[name][2]},
+                }
+            }
 
-    if os.path.isfile(path):
-        photo = os.path.splitext(image)[0].lower() + "a.jpg"
-        thumb = os.path.splitext(image)[0].lower() + "t.jpg"
-        content.photo_image = (
-            os.path.basename(image).lower(),
-            os.path.join("photos", photo),
-            os.path.join("photos", thumb),
+
+def process_image(generator, content, image):
+    try:
+        content.photo_image = ArticleImage(
+            content=content, filename=image, generator=generator
         )
-        enqueue_resize(
-            path, os.path.join("photos", photo), generator.settings["PHOTO_ARTICLE"]
-        )
-        enqueue_resize(
-            path, os.path.join("photos", thumb), generator.settings["PHOTO_THUMB"]
-        )
-    else:
-        logger.error(f"photo: No photo for {content.source_path} at {path}")
+    except FileNotFound as e:
+        logger.error(f"photo: {str(e)}")
 
 
 def detect_image(generator, content):
@@ -724,6 +984,7 @@ def register():
     """Uses the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
     try:
+        signals.generator_init.connect(prepare_config)
         signals.content_object_init.connect(detect_content)
         signals.all_generators_finalized.connect(detect_images_and_galleries)
         signals.article_writer_finalized.connect(resize_photos)
