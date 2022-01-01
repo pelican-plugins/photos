@@ -39,6 +39,13 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 `PHOTO_RESIZE_JOBS = 5`
 : Number of parallel resize jobs to be run. Defaults to 1.
 
+- `-1` = Do not use the Python multiprocessing module and enable additional debugging
+- `0` = Try to detect cpu count and start `CPU_COUNT + 1` processes
+- `1` = Use 1 process
+- `2` = Use 2 processes
+- `3` = Use 3 processes
+- ...
+
 `PHOTO_WATERMARK = True`
 : Adds a watermark to all photos in articles and pages. Defaults to using your site name.
 

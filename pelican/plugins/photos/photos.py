@@ -18,6 +18,7 @@ from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
 
 logger = logging.getLogger(__name__)
+pelican_settings: Dict[str, Any] = {}
 
 try:
     from PIL import Image as PILImage
@@ -61,7 +62,7 @@ class ArticleImage:
         self._filename = filename
         if filename.startswith("{photo}"):
             path = os.path.join(
-                os.path.expanduser(generator.settings["PHOTO_LIBRARY"]),
+                os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]),
                 image_clipper(filename),
             )
             image = image_clipper(filename)
@@ -79,15 +80,13 @@ class ArticleImage:
         img = Image(
             src=path,
             dst=os.path.join("photos", photo),
-            specs=generator.settings["PHOTO_ARTICLE"],
-            settings=generator.settings,
+            specs=pelican_settings["PHOTO_ARTICLE"],
         )
         self.image = enqueue_resize(img)
         img = Image(
             src=path,
             dst=os.path.join("photos", thumb),
-            specs=generator.settings["PHOTO_THUMB"],
-            settings=generator.settings,
+            specs=pelican_settings["PHOTO_THUMB"],
         )
         self.thumb = enqueue_resize(img)
         self.file = os.path.basename(image).lower()
@@ -107,10 +106,10 @@ class ArticleImage:
 
 
 class ContentImage:
-    def __init__(self, filename, settings: Dict[str, Any]):
+    def __init__(self, filename):
         self.filename = filename
         self._src_filename = os.path.join(
-            os.path.expanduser(settings["PHOTO_LIBRARY"]), self.filename
+            os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]), self.filename
         )
 
         if not os.path.isfile(self._src_filename):
@@ -119,17 +118,16 @@ class ContentImage:
         img = Image(
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "a"),
-            specs=settings["PHOTO_ARTICLE"],
-            settings=settings,
+            specs=pelican_settings["PHOTO_ARTICLE"],
         )
         self.image = enqueue_resize(img)
 
 
 class ContentImageLightbox:
-    def __init__(self, filename, settings: Dict[str, Any]):
+    def __init__(self, filename):
         self.filename = filename
         self._src_filename = os.path.join(
-            os.path.expanduser(settings["PHOTO_LIBRARY"]), self.filename
+            os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]), self.filename
         )
 
         if not os.path.isfile(self._src_filename):
@@ -147,16 +145,14 @@ class ContentImageLightbox:
         img = Image(
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower()),
-            specs=settings["PHOTO_GALLERY"],
-            settings=settings,
+            specs=pelican_settings["PHOTO_GALLERY"],
         )
         self.image = enqueue_resize(img)
 
         img = Image(
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "t"),
-            specs=settings["PHOTO_THUMB"],
-            settings=settings,
+            specs=pelican_settings["PHOTO_THUMB"],
         )
         self.thumb = enqueue_resize(img)
 
@@ -175,12 +171,12 @@ class Gallery:
 
         if location_parsed["type"] == "{photo}":
             dir_gallery = os.path.join(
-                os.path.expanduser(content.settings["PHOTO_LIBRARY"]),
+                os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]),
                 location_parsed["location"],
             )
             rel_gallery = location_parsed["location"]
         elif location_parsed["type"] == "{filename}":
-            base_path = os.path.join(content.settings["PATH"], content.relative_dir)
+            base_path = os.path.join(pelican_settings["PATH"], content.relative_dir)
             dir_gallery = os.path.join(base_path, location_parsed["location"])
             rel_gallery = os.path.join(
                 content.relative_dir, location_parsed["location"]
@@ -243,8 +239,7 @@ class GalleryImage:
             dst=os.path.join(
                 self._gallery.dst_dir, os.path.splitext(filename)[0].lower()
             ),
-            specs=self._gallery.content.settings["PHOTO_GALLERY"],
-            settings=self._gallery.content.settings,
+            specs=pelican_settings["PHOTO_GALLERY"],
         )
         self.image = enqueue_resize(img)
 
@@ -253,8 +248,7 @@ class GalleryImage:
             dst=os.path.join(
                 self._gallery.dst_dir, os.path.splitext(filename)[0].lower() + "t"
             ),
-            specs=self._gallery.content.settings["PHOTO_THUMB"],
-            settings=self._gallery.content.settings,
+            specs=pelican_settings["PHOTO_THUMB"],
         )
         self.thumb = enqueue_resize(img)
 
@@ -283,15 +277,11 @@ class Image:
         dst,
         spec: Optional[Dict[str, Any]] = None,
         specs: Optional[Dict[str, Dict[str, Any]]] = None,
-        settings: Optional[Dict[str, Any]] = None,
     ):
         if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
         self.src = src
         self.dst = dst
-        self._settings = settings
-        if self._settings is None:
-            self._settings = {}
 
         self.mimetype, _ = mimetypes.guess_type(self.src)
         _, _, image_type = self.mimetype.partition("/")
@@ -306,9 +296,9 @@ class Image:
 
         self.spec: Dict[str, Any] = spec.copy()
 
-        image_options: Dict[str, Any] = settings["PHOTO_DEFAULT_IMAGE_OPTIONS"].get(
-            spec["type"]
-        )
+        image_options: Dict[str, Any] = pelican_settings[
+            "PHOTO_DEFAULT_IMAGE_OPTIONS"
+        ].get(spec["type"])
         if image_options is None:
             image_options = {}
         if not isinstance(image_options, dict):
@@ -322,7 +312,7 @@ class Image:
 
         self.web_filename = "{resized}.{extension}".format(
             resized=self.dst,
-            extension=self._settings["PHOTO_FILE_EXTENSIONS"].get(
+            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
                 self.spec["type"].lower(), self.spec["type"].lower()
             ),
         )
@@ -331,11 +321,9 @@ class Image:
         if not isinstance(srcset_specs, (list, tuple)):
             srcset_specs = []
 
-        self.srcset = ImageSrcSet(settings=self._settings)
+        self.srcset = ImageSrcSet()
         for srcset_spec in srcset_specs:
-            img = SrcSetImage(
-                src=self.src, dst=self.dst, spec=srcset_spec, settings=self._settings
-            )
+            img = SrcSetImage(src=self.src, dst=self.dst, spec=srcset_spec)
             self.srcset.append(enqueue_resize(img))
 
     def __str__(self):
@@ -357,24 +345,26 @@ class Image:
             logger.debug("EXIF information not found")
             exif = {}
 
-        if self._settings["PHOTO_EXIF_AUTOROTATE"]:
+        if pelican_settings["PHOTO_EXIF_AUTOROTATE"]:
             img, exif = self.rotate(img, exif)
 
-        if self._settings["PHOTO_EXIF_REMOVE_GPS"]:
+        if pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
             exif.pop("GPS")
 
-        if self._settings["PHOTO_EXIF_COPYRIGHT"]:
+        if pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
             # Be minimally destructive to any preset EXIF author or copyright
             # information. If there is copyright or author information, prefer that
             # over everything else.
             if not exif["0th"].get(piexif.ImageIFD.Artist):
-                exif["0th"][piexif.ImageIFD.Artist] = self._settings[
+                exif["0th"][piexif.ImageIFD.Artist] = pelican_settings[
                     "PHOTO_EXIF_COPYRIGHT_AUTHOR"
                 ]
-                author = self._settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
+                author = pelican_settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
 
             if not exif["0th"].get(piexif.ImageIFD.Copyright):
-                license = build_license(self._settings["PHOTO_EXIF_COPYRIGHT"], author)
+                license = build_license(
+                    pelican_settings["PHOTO_EXIF_COPYRIGHT"], author
+                )
                 exif["0th"][piexif.ImageIFD.Copyright] = license
 
         return img, piexif.dump(exif)
@@ -402,20 +392,22 @@ class Image:
         background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
         return background
 
-    def resize(self, generator: pelican.generators.Generator):
-        settings = generator.settings
-        resized = os.path.join(generator.output_path, self.dst)
+    def resize(self, output_path):
+        resized = os.path.join(output_path, self.dst)
         orig = self.src
         spec = self.spec
 
         output_filename = "{resized}.{extension}".format(
             resized=resized,
-            extension=settings["PHOTO_FILE_EXTENSIONS"].get(
+            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
                 spec["type"].lower(), spec["type"].lower()
             ),
         )
 
-        logger.info(f"photos: make photo {orig} -> {output_filename}")
+        process = multiprocessing.current_process()
+        logger.info(
+            f"photos: make photo(PID: {process.pid}) {orig} -> {output_filename}"
+        )
 
         im = PILImage.open(orig)
 
@@ -429,10 +421,10 @@ class Image:
             return
 
         # if (
-        #     ispiexif and settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
+        #     ispiexif and pelican_settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
         # ):  # Only works with JPEG exif for sure.
         #     try:
-        #         im, exif_copy = manipulate_exif(im, settings)
+        #         im, exif_copy = manipulate_exif(im)
         #     except Exception:
         #         logger.info(f"photos: no EXIF or EXIF error in {orig}")
         #         exif_copy = b""
@@ -441,14 +433,17 @@ class Image:
         #
         # icc_profile = im.info.get("icc_profile", None)
 
-        if settings["PHOTO_SQUARE_THUMB"] and spec == settings["PHOTO_THUMB"]:
+        if (
+            pelican_settings["PHOTO_SQUARE_THUMB"]
+            and spec == pelican_settings["PHOTO_THUMB"]
+        ):
             im = ImageOps.fit(im, (spec["width"], spec["height"]), PILImage.ANTIALIAS)
 
         im.thumbnail((spec["width"], spec["height"]), PILImage.ANTIALIAS)
         directory = os.path.split(resized)[0]
 
         if self.is_alpha(im):
-            im = self.remove_alpha(im, settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
+            im = self.remove_alpha(im, pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
 
         if not os.path.exists(directory):
             try:
@@ -458,9 +453,9 @@ class Image:
         else:
             logger.debug(f"Directory already exists at {os.path.split(resized)[0]}")
 
-        if settings["PHOTO_WATERMARK"]:
-            isthumb = True if spec == settings["PHOTO_THUMB"] else False
-            if not isthumb or (isthumb and settings["PHOTO_WATERMARK_THUMB"]):
+        if pelican_settings["PHOTO_WATERMARK"]:
+            isthumb = True if spec == pelican_settings["PHOTO_THUMB"] else False
+            if not isthumb or (isthumb and pelican_settings["PHOTO_WATERMARK_THUMB"]):
                 im = self.watermark(im)
 
         image_options = spec.get("options", {})
@@ -505,31 +500,31 @@ class Image:
         mark_size = [0, 0]
         text_position = [0, 0]
 
-        if self._settings["PHOTO_WATERMARK_TEXT"]:
+        if pelican_settings["PHOTO_WATERMARK_TEXT"]:
             font_name = "SourceCodePro-Bold.otf"
             default_font = os.path.join(DEFAULT_CONFIG["plugin_dir"], font_name)
             font = ImageFont.FreeTypeFont(
                 default_font, watermark_layer.size[0] // text_reducer
             )
             text_size = draw_watermark.textsize(
-                self._settings["PHOTO_WATERMARK_TEXT"], font
+                pelican_settings["PHOTO_WATERMARK_TEXT"], font
             )
             text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
             draw_watermark.text(
                 text_position,
-                self._settings["PHOTO_WATERMARK_TEXT"],
-                self._settings["PHOTO_WATERMARK_TEXT_COLOR"],
+                pelican_settings["PHOTO_WATERMARK_TEXT"],
+                pelican_settings["PHOTO_WATERMARK_TEXT_COLOR"],
                 font=font,
             )
 
-        if self._settings["PHOTO_WATERMARK_IMG"]:
-            mark_image = PILImage.open(self._settings["PHOTO_WATERMARK_IMG"])
+        if pelican_settings["PHOTO_WATERMARK_IMG"]:
+            mark_image = PILImage.open(pelican_settings["PHOTO_WATERMARK_IMG"])
             mark_image_size = [
                 watermark_layer.size[0] // image_reducer for size in mark_size
             ]
             mark_image_size = (
-                self._settings["PHOTO_WATERMARK_IMG_SIZE"]
-                if self._settings["PHOTO_WATERMARK_IMG_SIZE"]
+                pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
+                if pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
                 else mark_image_size
             )
             mark_image.thumbnail(mark_image_size, PILImage.ANTIALIAS)
@@ -560,7 +555,6 @@ class SrcSetImage(Image):
         src,
         dst,
         spec: Optional[Dict[str, Any]] = None,
-        settings: Optional[Dict[str, Any]] = None,
     ):
         self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
 
@@ -569,14 +563,10 @@ class SrcSetImage(Image):
             dst_suffix = self.descriptor
 
         dst = f"{dst}_{dst_suffix}"
-        super().__init__(src=src, dst=dst, spec=spec, settings=settings)
+        super().__init__(src=src, dst=dst, spec=spec)
 
 
 class ImageSrcSet(list):
-    def __init__(self, settings):
-        super().__init__()
-        self._settings = settings
-
     @property
     def html_srcset(self):
         items = []
@@ -585,7 +575,7 @@ class ImageSrcSet(list):
             items.append(
                 "{url} {descriptor}".format(
                     url=urllib.parse.urljoin(
-                        self._settings["SITEURL"], img.web_filename
+                        pelican_settings["SITEURL"], img.web_filename
                     ),
                     descriptor=img.descriptor,
                 )
@@ -661,6 +651,9 @@ def initialized(pelican: Pelican):
             "PHOTO_DEFAULT_IMAGE_OPTIONS", {"jpeg": {"optimize": True}}
         )
 
+    global pelican_settings
+    pelican_settings = pelican.settings
+
 
 def read_notes(filename, msg=None):
     notes = {}
@@ -720,24 +713,26 @@ def build_license(license, author):
         )
 
 
-def resize_worker(img: Image, generator: pelican.generators.Generator):
-    img.resize(generator)
-
-
 def resize_photos(generator, writer):
-    if generator.settings["PHOTO_RESIZE_JOBS"] == -1:
-        debug = True
-        generator.settings["PHOTO_RESIZE_JOBS"] = 1
-    else:
-        debug = False
+    debug = False
+    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
-    pool = multiprocessing.Pool(generator.settings["PHOTO_RESIZE_JOBS"])
+    if resize_job_number == -1:
+        debug = True
+        resize_job_number = 1
+    elif resize_job_number == 0:
+        resize_job_number = os.cpu_count() + 1
+
+    logger.info(f"photos: Creating resize pool with {resize_job_number} worker(s) ...")
+
+    pool = multiprocessing.Pool(processes=resize_job_number)
     logger.debug(f"Debug Status: {debug}")
+    logger.info(f"photos: {len(DEFAULT_CONFIG['queue_resize'])} images in resize queue")
     for img in DEFAULT_CONFIG["queue_resize"].values():
         if debug:
-            resize_worker(img, generator)
+            img.resize(generator.output_path)
         else:
-            pool.apply_async(resize_worker, (img, generator))
+            pool.apply_async(img.resize, (generator.output_path,))
 
     pool.close()
     pool.join()
@@ -761,7 +756,7 @@ def detect_content(content):
 
         if what == "photo":
             try:
-                img = ContentImage(filename=value, settings=settings)
+                img = ContentImage(filename=value)
             except FileNotFound as e:
                 logger.error(f"photos: {str(e)}")
                 return output
@@ -774,7 +769,7 @@ def detect_content(content):
                     m.group("src"),
                     "=",
                     m.group("quote"),
-                    os.path.join(settings["SITEURL"], img.image.web_filename),
+                    os.path.join(pelican_settings["SITEURL"], img.image.web_filename),
                     m.group("quote"),
                     m.group("attrs_after"),
                 )
@@ -782,7 +777,7 @@ def detect_content(content):
 
         elif what == "lightbox" and tag == "img":
             try:
-                img = ContentImageLightbox(filename=value, settings=settings)
+                img = ContentImageLightbox(filename=value)
             except FileNotFound as e:
                 logger.error(f"photos: {str(e)}")
                 return output
@@ -791,13 +786,15 @@ def detect_content(content):
 
             gallery_name = value.split("/")[0]
             lightbox_attr_list.append(
-                '{}="{}"'.format(settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name)
+                '{}="{}"'.format(
+                    pelican_settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name
+                )
             )
 
             if img.caption:
                 lightbox_attr_list.append(
                     '{}="{}"'.format(
-                        settings["PHOTO_LIGHTBOX_CAPTION_ATTR"], img.caption
+                        pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"], img.caption
                     )
                 )
 
@@ -807,14 +804,14 @@ def detect_content(content):
                 (
                     "<a href=",
                     m.group("quote"),
-                    os.path.join(settings["SITEURL"], img.image.web_filename),
+                    os.path.join(pelican_settings["SITEURL"], img.image.web_filename),
                     m.group("quote"),
                     lightbox_attrs,
                     "><img",
                     m.group("attrs_before"),
                     "src=",
                     m.group("quote"),
-                    os.path.join(settings["SITEURL"], img.thumb.web_filename),
+                    os.path.join(pelican_settings["SITEURL"], img.thumb.web_filename),
                     m.group("quote"),
                     m.group("attrs_after"),
                     "</a>",
@@ -838,14 +835,13 @@ def detect_content(content):
             (?P=quote)
             (?P<attrs_after>[^\>]*>)
         """.format(
-            content.settings["INTRASITE_LINK_REGEX"]
+            pelican_settings["INTRASITE_LINK_REGEX"]
         )
         hrefs = re.compile(regex, re.X)
 
     if content._content and (
         "{photo}" in content._content or "{lightbox}" in content._content
     ):
-        settings = content.settings
         content._content = hrefs.sub(replacer, content._content)
 
 
@@ -910,7 +906,7 @@ def detect_content_galleries(
             content, pattern_match.group("gallery_name")
         )
         template = generator.get_template(
-            generator.settings["PHOTO_INLINE_GALLERY_TEMPLATE"]
+            pelican_settings["PHOTO_INLINE_GALLERY_TEMPLATE"]
         )
         template_values = {
             "galleries": photo_galleries,
@@ -929,9 +925,9 @@ def detect_content_galleries(
         elif gallery:
             logger.error(f"photos: Gallery tag not recognized: {gallery}")
 
-    if content.settings["PHOTO_INLINE_GALLERY_ENABLED"]:
+    if pelican_settings["PHOTO_INLINE_GALLERY_ENABLED"]:
         content._content = re.sub(
-            content.settings["PHOTO_INLINE_GALLERY_PATTERN"],
+            pelican_settings["PHOTO_INLINE_GALLERY_PATTERN"],
             replace_gallery_string,
             content._content,
         )
@@ -946,16 +942,15 @@ def file_clipper(x):
 
 
 def prepare_config(generator: pelican.generators.Generator):
-    settings = generator.settings
     for name in ("PHOTO_ARTICLE", "PHOTO_GALLERY", "PHOTO_THUMB"):
-        if isinstance(settings[name], (list, tuple)):
+        if isinstance(pelican_settings[name], (list, tuple)):
             logger.info(f"Converting legacy config to new values: {name}")
-            settings[name] = {
+            pelican_settings[name] = {
                 "default": {
-                    "width": settings[name][0],
-                    "height": settings[name][1],
+                    "width": pelican_settings[name][0],
+                    "height": pelican_settings[name][1],
                     "type": "jpeg",
-                    "options": {"quality": settings[name][2]},
+                    "options": {"quality": pelican_settings[name][2]},
                 }
             }
 
