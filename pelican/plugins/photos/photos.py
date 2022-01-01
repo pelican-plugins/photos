@@ -285,9 +285,7 @@ class Image:
         specs: Optional[Dict[str, Dict[str, Any]]] = None,
         settings: Optional[Dict[str, Any]] = None,
     ):
-        self.spec = spec
-        self.specs = specs
-        if self.spec is not None and self.specs is not None:
+        if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
         self.src = src
         self.dst = dst
@@ -299,12 +297,28 @@ class Image:
         _, _, image_type = self.mimetype.partition("/")
         self.type = image_type.lower()
 
-        if self.spec is None:
-            if self.specs is None:
+        if spec is None:
+            if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
-            self.spec = self.specs.get(image_type)
-            if self.spec is None:
-                self.spec = self.specs["default"]
+            spec = specs.get(image_type)
+            if spec is None:
+                spec = specs["default"]
+
+        self.spec: Dict[str, Any] = spec.copy()
+
+        image_options: Dict[str, Any] = settings["PHOTO_DEFAULT_IMAGE_OPTIONS"].get(
+            spec["type"]
+        )
+        if image_options is None:
+            image_options = {}
+        if not isinstance(image_options, dict):
+            logger.warning(
+                f"photos: Wrong type for default image options for type {spec['type']}"
+            )
+            image_options = {}
+        image_options = image_options.copy()
+        image_options.update(spec.get("options", {}))
+        self.spec["options"] = image_options
 
         self.web_filename = "{resized}.{extension}".format(
             resized=self.dst,
@@ -643,6 +657,9 @@ def initialized(pelican: Pelican):
             "PHOTO_INLINE_GALLERY_PATTERN", r"gallery::(?P<gallery_name>[/{}\w_-]+)"
         )
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_TEMPLATE", "inline_gallery")
+        pelican.settings.setdefault(
+            "PHOTO_DEFAULT_IMAGE_OPTIONS", {"jpeg": {"optimize": True}}
+        )
 
 
 def read_notes(filename, msg=None):
@@ -672,15 +689,15 @@ def enqueue_resize(img: Image) -> Image:
         DEFAULT_CONFIG["queue_resize"][img.dst] = img
     elif (
         DEFAULT_CONFIG["queue_resize"][img.dst].src != img.src
-        or DEFAULT_CONFIG["queue_resize"][img.dst].specs != img.specs
+        or DEFAULT_CONFIG["queue_resize"][img.dst].spec != img.spec
     ):
         raise InternalError(
             "resize conflict for {}, {}-{} is not {}-{}".format(
                 img.dst,
                 DEFAULT_CONFIG["queue_resize"][img.dst].src,
-                DEFAULT_CONFIG["queue_resize"][img.dst].specs,
+                DEFAULT_CONFIG["queue_resize"][img.dst].spec,
                 img.src,
-                img.specs,
+                img.spec,
             )
         )
     return img

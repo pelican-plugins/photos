@@ -86,6 +86,19 @@ r"gallery::(?P<gallery_name>[/{}\w_-]+)"
 
 Default: ```"inline_gallery"```
 
+`PHOTO_DEFAULT_IMAGE_OPTIONS`
+: Default keyword options to pass to the PIL.Image.save() function.
+You can find all available options in the [Pillow: Image file formats](https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html#image-file-formats) section.
+
+Defaults:
+```python
+{
+	"jpeg": {
+		"optimize": True
+	}
+}
+```
+
 The plug-in automatically resizes the photos and publishes them to the following output folder:
 
     ./output/photos
