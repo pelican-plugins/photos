@@ -1,6 +1,16 @@
 CHANGELOG
 =========
 
+1.2.0 - 2022-01-01
+------------------
+
+- Change code to use classes instead of tuples to hold image information
+- Add support to select image compression by source type. (jpeg -> webp, gif -> png, ...)
+- Add support for HTML srcset
+
+Contributed by [PhiBo](https://github.com/phibos) [PR #16](https://github.com/pelican-plugins/photos/pull/16/)
+
+
 1.1.0 - 2021-12-27
 ------------------
 
