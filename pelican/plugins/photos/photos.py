@@ -335,11 +335,11 @@ class GalleryImage:
             return self.thumb
         elif item == 3:
             if self.exif is None:
-                return None
+                return ""
             return self.exif.value
         elif item == 4:
             if self.caption is None:
-                return None
+                return ""
             return self.caption.value
 
         raise IndexError
