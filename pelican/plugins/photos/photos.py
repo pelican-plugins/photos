@@ -280,17 +280,14 @@ class Image:
     ):
         if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
-        self.src = src
-        self.dst = dst
 
-        self.mimetype, _ = mimetypes.guess_type(self.src)
-        _, _, image_type = self.mimetype.partition("/")
-        self.type = image_type.lower()
+        self.source_image = SourceImage.from_cache(src)
+        self.dst = dst
 
         if spec is None:
             if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
-            spec = specs.get(image_type)
+            spec = specs.get(self.source_image.type)
             if spec is None:
                 spec = specs["default"]
 
@@ -323,7 +320,9 @@ class Image:
 
         self.srcset = ImageSrcSet()
         for srcset_spec in srcset_specs:
-            img = SrcSetImage(src=self.src, dst=self.dst, spec=srcset_spec)
+            img = SrcSetImage(
+                src=self.source_image.filename, dst=self.dst, spec=srcset_spec
+            )
             self.srcset.append(enqueue_resize(img))
 
     def __str__(self):
@@ -394,7 +393,6 @@ class Image:
 
     def resize(self, output_path):
         resized = os.path.join(output_path, self.dst)
-        orig = self.src
         spec = self.spec
 
         output_filename = "{resized}.{extension}".format(
@@ -406,16 +404,17 @@ class Image:
 
         process = multiprocessing.current_process()
         logger.info(
-            f"photos: make photo(PID: {process.pid}) {orig} -> {output_filename}"
+            f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
+            f"-> {output_filename}"
         )
 
-        im = PILImage.open(orig)
+        im = self.source_image.open()
 
         if os.path.isfile(output_filename) and os.path.getmtime(
-            orig
+            self.source_image.filename
         ) <= os.path.getmtime(output_filename):
             logger.debug(
-                f"Skipping orig: {os.path.getmtime(orig)} "
+                f"Skipping orig: {os.path.getmtime(self.source_image.filename)} "
                 f"{os.path.getmtime(output_filename)}"
             )
             return
@@ -583,6 +582,31 @@ class ImageSrcSet(list):
         return ", ".join(items)
 
 
+class SourceImage:
+    image_cache: Dict[str, "SourceImage"] = {}
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.mimetype, _ = mimetypes.guess_type(filename)
+        _, _, image_type = self.mimetype.partition("/")
+        self.type = image_type.lower()
+
+        self._image: PILImage = None
+
+    def open(self):
+        logger.debug(f"photos: Open file {self.filename}")
+        return PILImage.open(self.filename)
+
+    @classmethod
+    def from_cache(cls, filename):
+        source_image = cls.image_cache.get(filename)
+        if source_image is None:
+            source_image = cls(filename=filename)
+            cls.image_cache[filename] = source_image
+
+        return source_image
+
+
 def initialized(pelican: Pelican):
     p = os.path.expanduser("~/Pictures")
 
@@ -681,15 +705,15 @@ def enqueue_resize(img: Image) -> Image:
     if img.dst not in DEFAULT_CONFIG["queue_resize"]:
         DEFAULT_CONFIG["queue_resize"][img.dst] = img
     elif (
-        DEFAULT_CONFIG["queue_resize"][img.dst].src != img.src
+        DEFAULT_CONFIG["queue_resize"][img.dst].source_image != img.source_image
         or DEFAULT_CONFIG["queue_resize"][img.dst].spec != img.spec
     ):
         raise InternalError(
             "resize conflict for {}, {}-{} is not {}-{}".format(
                 img.dst,
-                DEFAULT_CONFIG["queue_resize"][img.dst].src,
+                DEFAULT_CONFIG["queue_resize"][img.dst].source_image.filename,
                 DEFAULT_CONFIG["queue_resize"][img.dst].spec,
-                img.src,
+                img.source_image.filename,
                 img.spec,
             )
         )
