@@ -49,6 +49,10 @@ class GalleryNotFound(Exception):
     pass
 
 
+class ImageExcluded(Exception):
+    pass
+
+
 class ArticleImage:
     def __init__(
         self,
@@ -105,6 +109,89 @@ class ArticleImage:
             raise IndexError
 
 
+class BaseNoteCache:
+    note_cache: Dict[str, "BaseNoteCache"] = {}
+    note_filename = None
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.notes: Dict[str, str] = {}
+        self._read()
+
+    def _read(self):
+        try:
+            with pelican_open(self.filename) as text:
+                for line in text.splitlines():
+                    if line.startswith("#"):
+                        continue
+                    m = line.split(":", 1)
+                    if len(m) > 1:
+                        pic = m[0].strip()
+                        note = m[1].strip()
+                        if pic and note:
+                            self.notes[pic] = note
+                    else:
+                        self.notes[line] = ""
+        except Exception as e:
+            logger.debug(
+                f"photos: read_notes issue at file {self.filename}. "
+                f"Debug message:{e}"
+            )
+
+    def get_value(self, source_image):
+        return self.notes.get(os.path.basename(source_image.filename))
+
+    @classmethod
+    def from_cache(cls, source_image: "SourceImage"):
+        filename = os.path.join(
+            os.path.dirname(source_image.filename), cls.note_filename
+        )
+        notes = cls.note_cache.get(filename)
+        if notes is None:
+            notes = cls(filename=filename)
+        return notes
+
+
+class CaptionCache(BaseNoteCache):
+    note_filename = "captions.txt"
+
+
+class ExifCache(BaseNoteCache):
+    note_filename = "exif.txt"
+
+
+class ExcludeCache(BaseNoteCache):
+    note_filename = "blacklist.txt"
+
+
+class BaseNote:
+    cache_class = None
+
+    def __init__(self, source_image):
+        print(self.cache_class)
+        self.cache = self.cache_class.from_cache(source_image)
+        self._value = self.cache.get_value(source_image)
+
+    def __str__(self):
+        return self.value
+
+    @property
+    def value(self):
+        return self._value
+
+
+class Caption(BaseNote):
+    cache_class = CaptionCache
+
+
+class Exif(BaseNote):
+    cache_class = ExifCache
+
+
+class ExcludeList(BaseNote):
+    cache_class = ExcludeCache
+
+
 class ContentImage:
     def __init__(self, filename):
         self.filename = filename
@@ -133,15 +220,6 @@ class ContentImageLightbox:
         if not os.path.isfile(self._src_filename):
             raise FileNotFound(f"No photo for {self._src_filename}")
 
-        captions = read_notes(
-            os.path.join(os.path.dirname(filename), "captions.txt"),
-            msg="photos: No captions for gallery",
-        )
-
-        self.caption = None
-        if captions:
-            self.caption = captions.get(os.path.basename(self.filename))
-
         img = Image(
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower()),
@@ -155,6 +233,10 @@ class ContentImageLightbox:
             specs=pelican_settings["PHOTO_THUMB"],
         )
         self.thumb = enqueue_resize(img)
+
+    @property
+    def caption(self):
+        return self.image.caption
 
 
 class Gallery:
@@ -193,17 +275,6 @@ class Gallery:
 
         logger.info(f"photos: Gallery detected: {rel_gallery}")
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
-        self.exifs = read_notes(
-            os.path.join(dir_gallery, "exif.txt"), msg="photos: No EXIF for gallery"
-        )
-        self.captions = read_notes(
-            os.path.join(dir_gallery, "captions.txt"),
-            msg="photos: No captions for gallery",
-        )
-        blacklist = read_notes(
-            os.path.join(dir_gallery, "blacklist.txt"),
-            msg="photos: No blacklist for gallery",
-        )
         self.images: List[GalleryImage] = []
 
         self.title = location_parsed["title"]
@@ -212,10 +283,11 @@ class Gallery:
                 continue
             if pic.endswith(".txt"):
                 continue
-            if pic in blacklist:
-                continue
 
-            self.images.append(GalleryImage(filename=pic, gallery=self))
+            try:
+                self.images.append(GalleryImage(filename=pic, gallery=self))
+            except ImageExcluded:
+                logger.debug(f"photos: Image {pic} excluded")
 
     def __getitem__(self, item):
         if item == 0:
@@ -231,9 +303,6 @@ class GalleryImage:
         self._gallery = gallery
         self.filename = filename
 
-        self.exif = self._gallery.exifs.get(filename, "")
-        self.caption = self._gallery.captions.get(filename, "")
-
         img = Image(
             src=os.path.join(self._gallery.src_dir, self.filename),
             dst=os.path.join(
@@ -241,6 +310,8 @@ class GalleryImage:
             ),
             specs=pelican_settings["PHOTO_GALLERY"],
         )
+        if img.is_excluded:
+            raise ImageExcluded("Image excluded from gallery")
         self.image = enqueue_resize(img)
 
         img = Image(
@@ -263,11 +334,27 @@ class GalleryImage:
         elif item == 2:
             return self.thumb
         elif item == 3:
-            return self.exif
+            if self.exif is None:
+                return ""
+            return self.exif.value
         elif item == 4:
-            return self.caption
+            if self.caption is None:
+                return ""
+            return self.caption.value
 
         raise IndexError
+
+    @property
+    def caption(self):
+        return self.image.caption
+
+    @property
+    def exif(self):
+        return self.image.exif
+
+    @property
+    def is_excluded(self):
+        return self.image.is_excluded
 
 
 class Image:
@@ -280,17 +367,14 @@ class Image:
     ):
         if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
-        self.src = src
-        self.dst = dst
 
-        self.mimetype, _ = mimetypes.guess_type(self.src)
-        _, _, image_type = self.mimetype.partition("/")
-        self.type = image_type.lower()
+        self.source_image = SourceImage.from_cache(src)
+        self.dst = dst
 
         if spec is None:
             if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
-            spec = specs.get(image_type)
+            spec = specs.get(self.source_image.type)
             if spec is None:
                 spec = specs["default"]
 
@@ -323,11 +407,25 @@ class Image:
 
         self.srcset = ImageSrcSet()
         for srcset_spec in srcset_specs:
-            img = SrcSetImage(src=self.src, dst=self.dst, spec=srcset_spec)
+            img = SrcSetImage(
+                src=self.source_image.filename, dst=self.dst, spec=srcset_spec
+            )
             self.srcset.append(enqueue_resize(img))
 
     def __str__(self):
         return self.web_filename
+
+    @property
+    def caption(self):
+        return self.source_image.caption
+
+    @property
+    def exif(self):
+        return self.source_image.exif
+
+    @property
+    def is_excluded(self):
+        return self.source_image.is_excluded
 
     @staticmethod
     def is_alpha(img):
@@ -394,7 +492,6 @@ class Image:
 
     def resize(self, output_path):
         resized = os.path.join(output_path, self.dst)
-        orig = self.src
         spec = self.spec
 
         output_filename = "{resized}.{extension}".format(
@@ -406,16 +503,17 @@ class Image:
 
         process = multiprocessing.current_process()
         logger.info(
-            f"photos: make photo(PID: {process.pid}) {orig} -> {output_filename}"
+            f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
+            f"-> {output_filename}"
         )
 
-        im = PILImage.open(orig)
+        im = self.source_image.open()
 
         if os.path.isfile(output_filename) and os.path.getmtime(
-            orig
+            self.source_image.filename
         ) <= os.path.getmtime(output_filename):
             logger.debug(
-                f"Skipping orig: {os.path.getmtime(orig)} "
+                f"Skipping orig: {os.path.getmtime(self.source_image.filename)} "
                 f"{os.path.getmtime(output_filename)}"
             )
             return
@@ -583,6 +681,51 @@ class ImageSrcSet(list):
         return ", ".join(items)
 
 
+class SourceImage:
+    image_cache: Dict[str, "SourceImage"] = {}
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.mimetype, _ = mimetypes.guess_type(filename)
+        _, _, image_type = self.mimetype.partition("/")
+        self.type = image_type.lower()
+
+        self._caption = Caption(source_image=self)
+        self._exif = Exif(source_image=self)
+        self._excluded = ExcludeList(source_image=self)
+
+    @property
+    def caption(self):
+        if self._caption.value is None:
+            return None
+        return self._caption
+
+    @property
+    def exif(self):
+        if self._exif.value is None:
+            return None
+        return self._exif
+
+    @property
+    def is_excluded(self):
+        if self._excluded.value is None:
+            return False
+        return True
+
+    def open(self):
+        logger.debug(f"photos: Open file {self.filename}")
+        return PILImage.open(self.filename)
+
+    @classmethod
+    def from_cache(cls, filename):
+        source_image = cls.image_cache.get(filename)
+        if source_image is None:
+            source_image = cls(filename=filename)
+            cls.image_cache[filename] = source_image
+
+        return source_image
+
+
 def initialized(pelican: Pelican):
     p = os.path.expanduser("~/Pictures")
 
@@ -655,41 +798,19 @@ def initialized(pelican: Pelican):
     pelican_settings = pelican.settings
 
 
-def read_notes(filename, msg=None):
-    notes = {}
-    try:
-        with pelican_open(filename) as text:
-            for line in text.splitlines():
-                if line.startswith("#"):
-                    continue
-                m = line.split(":", 1)
-                if len(m) > 1:
-                    pic = m[0].strip()
-                    note = m[1].strip()
-                    if pic and note:
-                        notes[pic] = note
-                else:
-                    notes[line] = ""
-    except Exception as e:
-        if msg:
-            logger.info(f"{msg} at file {filename}")
-        logger.debug(f"read_notes issue: {msg} at file {filename}. Debug message:{e}")
-    return notes
-
-
 def enqueue_resize(img: Image) -> Image:
     if img.dst not in DEFAULT_CONFIG["queue_resize"]:
         DEFAULT_CONFIG["queue_resize"][img.dst] = img
     elif (
-        DEFAULT_CONFIG["queue_resize"][img.dst].src != img.src
+        DEFAULT_CONFIG["queue_resize"][img.dst].source_image != img.source_image
         or DEFAULT_CONFIG["queue_resize"][img.dst].spec != img.spec
     ):
         raise InternalError(
             "resize conflict for {}, {}-{} is not {}-{}".format(
                 img.dst,
-                DEFAULT_CONFIG["queue_resize"][img.dst].src,
+                DEFAULT_CONFIG["queue_resize"][img.dst].source_image.filename,
                 DEFAULT_CONFIG["queue_resize"][img.dst].spec,
-                img.src,
+                img.source_image.filename,
                 img.spec,
             )
         )
@@ -794,7 +915,8 @@ def detect_content(content):
             if img.caption:
                 lightbox_attr_list.append(
                     '{}="{}"'.format(
-                        pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"], img.caption
+                        pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"],
+                        str(img.caption),
                     )
                 )
 
