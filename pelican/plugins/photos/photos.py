@@ -372,6 +372,9 @@ class Image:
         self.source_image = SourceImage.from_cache(src)
         self.dst = dst
 
+        self._height: Optional[int] = None
+        self._width: Optional[int] = None
+
         if spec is None:
             if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
@@ -380,10 +383,11 @@ class Image:
                 spec = specs["default"]
 
         self.spec: Dict[str, Any] = spec.copy()
+        self.type = spec["type"].lower()
 
         image_options: Dict[str, Any] = pelican_settings[
             "PHOTO_DEFAULT_IMAGE_OPTIONS"
-        ].get(spec["type"])
+        ].get(self.type)
         if image_options is None:
             image_options = {}
         if not isinstance(image_options, dict):
@@ -394,13 +398,6 @@ class Image:
         image_options = image_options.copy()
         image_options.update(spec.get("options", {}))
         self.spec["options"] = image_options
-
-        self.web_filename = "{resized}.{extension}".format(
-            resized=self.dst,
-            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
-                self.spec["type"].lower(), self.spec["type"].lower()
-            ),
-        )
 
         srcset_specs: Optional[List, Tuple] = self.spec.get("srcset")
         if not isinstance(srcset_specs, (list, tuple)):
@@ -413,15 +410,19 @@ class Image:
             )
             self.srcset.append(enqueue_resize(img))
 
-        self.output_filename = "{resized}.{extension}".format(
-            resized=os.path.join(pelican_output_path, self.dst),
+        self.output_filename = "{filename}.{extension}".format(
+            filename=os.path.join(pelican_output_path, self.dst),
             extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
-                spec["type"].lower(), spec["type"].lower()
+                self.type, self.type
             ),
         )
 
-        self._height: Optional[int] = None
-        self._width: Optional[int] = None
+        self.web_filename = "{resized}.{extension}".format(
+            resized=self.dst,
+            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
+                self.type, self.type
+            ),
+        )
 
     def __str__(self):
         return self.web_filename
@@ -460,7 +461,7 @@ class Image:
         return self._width
 
     def _load_result_info(self):
-        img: PILImage = PILImage.open(self.output_filename)
+        img: PILImage.Image = PILImage.open(self.output_filename)
         self._height = img.height
         self._width = img.width
 
@@ -580,7 +581,7 @@ class Image:
         image_options = spec.get("options", {})
         im.save(
             self.output_filename,
-            spec["type"],
+            self.type,
             # icc_profile=icc_profile,
             # exif=exif_copy,
             **image_options,
