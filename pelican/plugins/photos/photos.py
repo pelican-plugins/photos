@@ -465,6 +465,12 @@ class Image:
         self._height = img.height
         self._width = img.width
 
+    def apply_result_info(self, info: Dict[str, Any]):
+        allowed_names = ("_height", "_width")
+        for name in allowed_names:
+            if name in info:
+                setattr(self, name, info[name])
+
     def manipulate_exif(self, img):
         try:
             exif = piexif.load(img.info["exif"])
@@ -495,6 +501,10 @@ class Image:
                 exif["0th"][piexif.ImageIFD.Copyright] = license
 
         return img, piexif.dump(exif)
+
+    def process(self, key):
+        self.resize()
+        return key, {"_height": self._height, "_width": self._width}
 
     def reduce_opacity(self, im, opacity):
         """Reduces Opacity.
@@ -861,6 +871,14 @@ def build_license(license, author):
 
 
 def resize_photos(generator, writer):
+    def apply_result_info(result: Tuple[str, Dict[str, Any]]):
+        key, info = result
+        results[key] = info
+
+    def error_callback(e: BaseException):
+        logger.warning(f"photos: {e}")
+        logger.debug("photos: An exception occurred", exc_info=e)
+
     debug = False
     resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
@@ -875,14 +893,23 @@ def resize_photos(generator, writer):
     pool = multiprocessing.Pool(processes=resize_job_number)
     logger.debug(f"Debug Status: {debug}")
     logger.info(f"photos: {len(DEFAULT_CONFIG['queue_resize'])} images in resize queue")
-    for img in DEFAULT_CONFIG["queue_resize"].values():
+    results = {}
+    for img_key, img in DEFAULT_CONFIG["queue_resize"].items():
         if debug:
-            img.resize()
+            apply_result_info(img.process(img_key))
         else:
-            pool.apply_async(img.resize)
+            pool.apply_async(
+                img.process,
+                args=(img_key,),
+                callback=apply_result_info,
+                error_callback=error_callback,
+            )
 
     pool.close()
     pool.join()
+    logger.info("photos: Applying results")
+    for k, result_info in results.items():
+        DEFAULT_CONFIG["queue_resize"][k].apply_result_info(result_info)
 
 
 def detect_content(content):
