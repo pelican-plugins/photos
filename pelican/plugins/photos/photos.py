@@ -19,6 +19,7 @@ from pelican.utils import pelican_open
 
 logger = logging.getLogger(__name__)
 pelican_settings: Dict[str, Any] = {}
+pelican_output_path: Optional[str] = None
 
 try:
     from PIL import Image as PILImage
@@ -371,6 +372,9 @@ class Image:
         self.source_image = SourceImage.from_cache(src)
         self.dst = dst
 
+        self._height: Optional[int] = None
+        self._width: Optional[int] = None
+
         if spec is None:
             if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
@@ -379,10 +383,11 @@ class Image:
                 spec = specs["default"]
 
         self.spec: Dict[str, Any] = spec.copy()
+        self.type = spec["type"].lower()
 
         image_options: Dict[str, Any] = pelican_settings[
             "PHOTO_DEFAULT_IMAGE_OPTIONS"
-        ].get(spec["type"])
+        ].get(self.type)
         if image_options is None:
             image_options = {}
         if not isinstance(image_options, dict):
@@ -394,13 +399,6 @@ class Image:
         image_options.update(spec.get("options", {}))
         self.spec["options"] = image_options
 
-        self.web_filename = "{resized}.{extension}".format(
-            resized=self.dst,
-            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
-                self.spec["type"].lower(), self.spec["type"].lower()
-            ),
-        )
-
         srcset_specs: Optional[List, Tuple] = self.spec.get("srcset")
         if not isinstance(srcset_specs, (list, tuple)):
             srcset_specs = []
@@ -411,6 +409,20 @@ class Image:
                 src=self.source_image.filename, dst=self.dst, spec=srcset_spec
             )
             self.srcset.append(enqueue_resize(img))
+
+        self.output_filename = "{filename}.{extension}".format(
+            filename=os.path.join(pelican_output_path, self.dst),
+            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
+                self.type, self.type
+            ),
+        )
+
+        self.web_filename = "{resized}.{extension}".format(
+            resized=self.dst,
+            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
+                self.type, self.type
+            ),
+        )
 
     def __str__(self):
         return self.web_filename
@@ -435,6 +447,29 @@ class Image:
             or (img.mode == "P" and "transparency" in img.info)
             else False
         )
+
+    @property
+    def height(self):
+        if self._height is None:
+            self._load_result_info()
+        return self._height
+
+    @property
+    def width(self):
+        if self._width is None:
+            self._load_result_info()
+        return self._width
+
+    def _load_result_info(self):
+        img: PILImage.Image = PILImage.open(self.output_filename)
+        self._height = img.height
+        self._width = img.width
+
+    def apply_result_info(self, info: Dict[str, Any]):
+        allowed_names = ("_height", "_width")
+        for name in allowed_names:
+            if name in info:
+                setattr(self, name, info[name])
 
     def manipulate_exif(self, img):
         try:
@@ -467,6 +502,10 @@ class Image:
 
         return img, piexif.dump(exif)
 
+    def process(self, key):
+        self.resize()
+        return key, {"_height": self._height, "_width": self._width}
+
     def reduce_opacity(self, im, opacity):
         """Reduces Opacity.
 
@@ -490,33 +529,26 @@ class Image:
         background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
         return background
 
-    def resize(self, output_path):
-        resized = os.path.join(output_path, self.dst)
+    def resize(self):
         spec = self.spec
-
-        output_filename = "{resized}.{extension}".format(
-            resized=resized,
-            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
-                spec["type"].lower(), spec["type"].lower()
-            ),
-        )
 
         process = multiprocessing.current_process()
         logger.info(
             f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
-            f"-> {output_filename}"
+            f"-> {self.output_filename}"
         )
 
-        im = self.source_image.open()
-
-        if os.path.isfile(output_filename) and os.path.getmtime(
+        if os.path.isfile(self.output_filename) and os.path.getmtime(
             self.source_image.filename
-        ) <= os.path.getmtime(output_filename):
+        ) <= os.path.getmtime(self.output_filename):
             logger.debug(
                 f"Skipping orig: {os.path.getmtime(self.source_image.filename)} "
-                f"{os.path.getmtime(output_filename)}"
+                f"{os.path.getmtime(self.output_filename)}"
             )
+            self._load_result_info()
             return
+
+        im = self.source_image.open()
 
         # if (
         #     ispiexif and pelican_settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
@@ -538,18 +570,18 @@ class Image:
             im = ImageOps.fit(im, (spec["width"], spec["height"]), PILImage.ANTIALIAS)
 
         im.thumbnail((spec["width"], spec["height"]), PILImage.ANTIALIAS)
-        directory = os.path.split(resized)[0]
 
         if self.is_alpha(im):
             im = self.remove_alpha(im, pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
 
+        directory = os.path.dirname(self.output_filename)
         if not os.path.exists(directory):
             try:
                 os.makedirs(directory)
             except Exception:
                 logger.exception(f"Could not create {directory}")
         else:
-            logger.debug(f"Directory already exists at {os.path.split(resized)[0]}")
+            logger.debug(f"Directory already exists at {os.path.split(directory)[0]}")
 
         if pelican_settings["PHOTO_WATERMARK"]:
             isthumb = True if spec == pelican_settings["PHOTO_THUMB"] else False
@@ -558,12 +590,14 @@ class Image:
 
         image_options = spec.get("options", {})
         im.save(
-            output_filename,
-            spec["type"],
+            self.output_filename,
+            self.type,
             # icc_profile=icc_profile,
             # exif=exif_copy,
             **image_options,
         )
+        self._height = im.height
+        self._width = im.width
 
     @staticmethod
     def rotate(img, exif_dict):
@@ -796,6 +830,8 @@ def initialized(pelican: Pelican):
 
     global pelican_settings
     pelican_settings = pelican.settings
+    global pelican_output_path
+    pelican_output_path = pelican.output_path
 
 
 def enqueue_resize(img: Image) -> Image:
@@ -835,6 +871,14 @@ def build_license(license, author):
 
 
 def resize_photos(generator, writer):
+    def apply_result_info(result: Tuple[str, Dict[str, Any]]):
+        key, info = result
+        results[key] = info
+
+    def error_callback(e: BaseException):
+        logger.warning(f"photos: {e}")
+        logger.debug("photos: An exception occurred", exc_info=e)
+
     debug = False
     resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
@@ -849,14 +893,23 @@ def resize_photos(generator, writer):
     pool = multiprocessing.Pool(processes=resize_job_number)
     logger.debug(f"Debug Status: {debug}")
     logger.info(f"photos: {len(DEFAULT_CONFIG['queue_resize'])} images in resize queue")
-    for img in DEFAULT_CONFIG["queue_resize"].values():
+    results = {}
+    for img_key, img in DEFAULT_CONFIG["queue_resize"].items():
         if debug:
-            img.resize(generator.output_path)
+            apply_result_info(img.process(img_key))
         else:
-            pool.apply_async(img.resize, (generator.output_path,))
+            pool.apply_async(
+                img.process,
+                args=(img_key,),
+                callback=apply_result_info,
+                error_callback=error_callback,
+            )
 
     pool.close()
     pool.join()
+    logger.info("photos: Applying results")
+    for k, result_info in results.items():
+        DEFAULT_CONFIG["queue_resize"][k].apply_result_info(result_info)
 
 
 def detect_content(content):
