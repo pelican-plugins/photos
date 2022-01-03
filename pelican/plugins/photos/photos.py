@@ -870,7 +870,7 @@ def build_license(license, author):
         )
 
 
-def resize_photos(generator, writer):
+def resize_photos():
     def apply_result_info(result: Tuple[str, Dict[str, Any]]):
         key, info = result
         results[key] = info
@@ -1167,13 +1167,17 @@ def detect_images_and_galleries(generators):
                 detect_content_galleries(generator, page)
 
 
+def handle_signal_all_generators_finalized(generators: pelican.generators.Generator):
+    detect_images_and_galleries(generators)
+    resize_photos()
+
+
 def register():
     """Uses the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
     try:
         signals.generator_init.connect(prepare_config)
         signals.content_object_init.connect(detect_content)
-        signals.all_generators_finalized.connect(detect_images_and_galleries)
-        signals.article_writer_finalized.connect(resize_photos)
+        signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)
     except Exception as e:
         logger.exception(f"Plugin failed to execute: {pprint.pformat(e)}")
