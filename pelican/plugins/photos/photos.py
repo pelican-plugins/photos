@@ -76,6 +76,8 @@ class ArticleImage:
                 generator.path, content.relative_dir, file_clipper(filename)
             )
             image = file_clipper(filename)
+        else:
+            raise InternalError(f"Unable to detect image type {filename}")
 
         if not os.path.isfile(path):
             raise FileNotFound(f"No photo for {content.source_path} at {path}")
@@ -828,6 +830,18 @@ def initialized(pelican: Pelican):
             "PHOTO_DEFAULT_IMAGE_OPTIONS", {"jpeg": {"optimize": True}}
         )
 
+        for name in ("PHOTO_ARTICLE", "PHOTO_GALLERY", "PHOTO_THUMB"):
+            if isinstance(pelican.settings[name], (list, tuple)):
+                logger.info(f"Converting legacy config to new values: {name}")
+                pelican.settings[name] = {
+                    "default": {
+                        "width": pelican.settings[name][0],
+                        "height": pelican.settings[name][1],
+                        "type": "jpeg",
+                        "options": {"quality": pelican.settings[name][2]},
+                    }
+                }
+
     global pelican_settings
     pelican_settings = pelican.settings
     global pelican_output_path
@@ -1108,6 +1122,20 @@ def detect_content_galleries(
         )
 
 
+def detect_content_image(generator, content):
+    image = content.metadata.get("image", None)
+    if image:
+        if image.startswith("{photo}") or image.startswith("{filename}"):
+            try:
+                content.photo_image = ArticleImage(
+                    content=content, filename=image, generator=generator
+                )
+            except (FileNotFound, InternalError) as e:
+                logger.error(f"photo: {str(e)}")
+        else:
+            logger.error(f"photos: Image tag not recognized: {image}")
+
+
 def image_clipper(x):
     return x[8:] if x[8] == "/" else x[7:]
 
@@ -1116,39 +1144,7 @@ def file_clipper(x):
     return x[11:] if x[10] == "/" else x[10:]
 
 
-def prepare_config(generator: pelican.generators.Generator):
-    for name in ("PHOTO_ARTICLE", "PHOTO_GALLERY", "PHOTO_THUMB"):
-        if isinstance(pelican_settings[name], (list, tuple)):
-            logger.info(f"Converting legacy config to new values: {name}")
-            pelican_settings[name] = {
-                "default": {
-                    "width": pelican_settings[name][0],
-                    "height": pelican_settings[name][1],
-                    "type": "jpeg",
-                    "options": {"quality": pelican_settings[name][2]},
-                }
-            }
-
-
-def process_image(generator, content, image):
-    try:
-        content.photo_image = ArticleImage(
-            content=content, filename=image, generator=generator
-        )
-    except FileNotFound as e:
-        logger.error(f"photo: {str(e)}")
-
-
-def detect_image(generator, content):
-    image = content.metadata.get("image", None)
-    if image:
-        if image.startswith("{photo}") or image.startswith("{filename}"):
-            process_image(generator, content, image)
-        else:
-            logger.error(f"photos: Image tag not recognized: {image}")
-
-
-def detect_images_and_galleries(generators):
+def detect_content_images_and_galleries(generators):
     """Runs generator on both pages and articles."""
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
@@ -1156,28 +1152,24 @@ def detect_images_and_galleries(generators):
             for article in itertools.chain(
                 generator.articles, generator.translations, generator.drafts
             ):
-                detect_image(generator, article)
+                detect_content_image(generator, article)
                 detect_content_galleries(generator, article)
         elif isinstance(generator, PagesGenerator):
             page: Page
             for page in itertools.chain(
                 generator.pages, generator.translations, generator.hidden_pages
             ):
-                detect_image(generator, page)
+                detect_content_image(generator, page)
                 detect_content_galleries(generator, page)
 
 
 def handle_signal_all_generators_finalized(generators: pelican.generators.Generator):
-    detect_images_and_galleries(generators)
+    detect_content_images_and_galleries(generators)
     resize_photos()
 
 
 def register():
     """Uses the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
-    try:
-        signals.generator_init.connect(prepare_config)
-        signals.content_object_init.connect(detect_content)
-        signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)
-    except Exception as e:
-        logger.exception(f"Plugin failed to execute: {pprint.pformat(e)}")
+    signals.content_object_init.connect(detect_content)
+    signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)
