@@ -55,15 +55,19 @@ class ImageExcluded(Exception):
 
 
 class ArticleImage:
+    """Images/photos on the top of an article or page.
+
+    :param content: Internal content object
+    :param filename: The filename of the image
+    :param generator: The generator
+    """
+
     def __init__(
         self,
         content: pelican.contents.Content,
         filename: str,
         generator: pelican.generators.Generator,
     ):
-        """
-        Images/photos on the top of an article or page.
-        """
         self._filename = filename
         if filename.startswith("{photo}"):
             path = os.path.join(
@@ -76,6 +80,8 @@ class ArticleImage:
                 generator.path, content.relative_dir, file_clipper(filename)
             )
             image = file_clipper(filename)
+        else:
+            raise InternalError(f"Unable to detect image type {filename}")
 
         if not os.path.isfile(path):
             raise FileNotFound(f"No photo for {content.source_path} at {path}")
@@ -195,6 +201,7 @@ class ExcludeList(BaseNote):
 
 class ContentImage:
     def __init__(self, filename):
+        #: Filename
         self.filename = filename
         self._src_filename = os.path.join(
             os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]), self.filename
@@ -236,20 +243,21 @@ class ContentImageLightbox:
         self.thumb = enqueue_resize(img)
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
         return self.image.caption
 
 
 class Gallery:
-    def __init__(self, content: Union[Article, Page], location_parsed):
-        """
-        Process a single gallery
+    """
+    Process a single gallery
 
-        - look for images
-        - read meta data
-        - read exif data
-        - enqueue the images to be processed
-        """
+    - look for images
+    - read meta data
+    - read exif data
+    - enqueue the images to be processed
+    """
+
+    def __init__(self, content: Union[Article, Page], location_parsed):
         self.content = content
 
         if location_parsed["type"] == "{photo}":
@@ -300,8 +308,16 @@ class Gallery:
 
 
 class GalleryImage:
+    """
+    Image of a gallery
+
+    """
+
     def __init__(self, filename, gallery: Gallery):
+        #: The gallery this image belongs to
         self._gallery = gallery
+
+        #: The filename of the image
         self.filename = filename
 
         img = Image(
@@ -313,6 +329,8 @@ class GalleryImage:
         )
         if img.is_excluded:
             raise ImageExcluded("Image excluded from gallery")
+
+        #: The image object
         self.image = enqueue_resize(img)
 
         img = Image(
@@ -322,6 +340,7 @@ class GalleryImage:
             ),
             specs=pelican_settings["PHOTO_THUMB"],
         )
+        #: The thumbnail
         self.thumb = enqueue_resize(img)
 
     def __getitem__(self, item):
@@ -346,19 +365,25 @@ class GalleryImage:
         raise IndexError
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
         return self.image.caption
 
     @property
-    def exif(self):
+    def exif(self) -> Optional[Exif]:
         return self.image.exif
 
     @property
-    def is_excluded(self):
+    def is_excluded(self) -> bool:
+        """Is the image is excluded from the gallery"""
         return self.image.is_excluded
 
 
 class Image:
+    """
+    The main Image class to hold all information of the generated image and to process
+    the image.
+    """
+
     def __init__(
         self,
         src,
@@ -369,6 +394,7 @@ class Image:
         if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
 
+        #: The source image
         self.source_image = SourceImage.from_cache(src)
         self.dst = dst
 
@@ -382,7 +408,10 @@ class Image:
             if spec is None:
                 spec = specs["default"]
 
+        #: The specification how to transform the source image
         self.spec: Dict[str, Any] = spec.copy()
+
+        #: Image type e.g. jpeg, webp
         self.type = spec["type"].lower()
 
         image_options: Dict[str, Any] = pelican_settings[
@@ -403,6 +432,7 @@ class Image:
         if not isinstance(srcset_specs, (list, tuple)):
             srcset_specs = []
 
+        #: The srcset for the image used in HTML
         self.srcset = ImageSrcSet()
         for srcset_spec in srcset_specs:
             img = SrcSetImage(
@@ -410,6 +440,7 @@ class Image:
             )
             self.srcset.append(enqueue_resize(img))
 
+        #: The name of the output file
         self.output_filename = "{filename}.{extension}".format(
             filename=os.path.join(pelican_output_path, self.dst),
             extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
@@ -417,6 +448,7 @@ class Image:
             ),
         )
 
+        #: The name and path for the web page
         self.web_filename = "{resized}.{extension}".format(
             resized=self.dst,
             extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
@@ -428,19 +460,21 @@ class Image:
         return self.web_filename
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
+        """Caption of the image"""
         return self.source_image.caption
 
     @property
-    def exif(self):
+    def exif(self) -> Optional[Exif]:
         return self.source_image.exif
 
     @property
-    def is_excluded(self):
+    def is_excluded(self) -> bool:
+        """Is the image on the exclude-list"""
         return self.source_image.is_excluded
 
     @staticmethod
-    def is_alpha(img):
+    def is_alpha(img: PILImage.Image) -> bool:
         return (
             True
             if img.mode in ("RGBA", "LA")
@@ -449,29 +483,36 @@ class Image:
         )
 
     @property
-    def height(self):
+    def height(self) -> int:
+        """Height of the image"""
         if self._height is None:
             self._load_result_info()
         return self._height
 
     @property
-    def width(self):
+    def width(self) -> int:
+        """Width of the image"""
         if self._width is None:
             self._load_result_info()
         return self._width
 
     def _load_result_info(self):
+        """Load the information from the result image"""
         img: PILImage.Image = PILImage.open(self.output_filename)
         self._height = img.height
         self._width = img.width
 
     def apply_result_info(self, info: Dict[str, Any]):
+        """
+        Apply the information from the result image if it has been processed in a
+        different process.
+        """
         allowed_names = ("_height", "_width")
         for name in allowed_names:
             if name in info:
                 setattr(self, name, info[name])
 
-    def manipulate_exif(self, img):
+    def manipulate_exif(self, img: PILImage.Image) -> Tuple[PILImage.Image, str]:
         try:
             exif = piexif.load(img.info["exif"])
         except Exception:
@@ -502,11 +543,12 @@ class Image:
 
         return img, piexif.dump(exif)
 
-    def process(self, key):
+    def process(self, key: str) -> Tuple[str, Dict[str, Any]]:
+        """Process the image"""
         self.resize()
         return key, {"_height": self._height, "_width": self._width}
 
-    def reduce_opacity(self, im, opacity):
+    def reduce_opacity(self, im: PILImage.Image, opacity) -> PILImage.Image:
         """Reduces Opacity.
 
         Returns an image with reduced opacity.
@@ -524,12 +566,14 @@ class Image:
         return im
 
     @staticmethod
-    def remove_alpha(img, bg_color):
+    def remove_alpha(img: PILImage.Image, bg_color) -> PILImage.Image:
+        """Remove the alpha channel"""
         background = PILImage.new("RGB", img.size, bg_color)
         background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
         return background
 
     def resize(self):
+        """Resize the image"""
         spec = self.spec
 
         process = multiprocessing.current_process()
@@ -600,7 +644,8 @@ class Image:
         self._width = im.width
 
     @staticmethod
-    def rotate(img, exif_dict):
+    def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
+        """Rotate the image with the information from exif data"""
         if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
             orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
             if orientation == 2:
@@ -620,7 +665,8 @@ class Image:
 
         return img, exif_dict
 
-    def watermark(self, image):
+    def watermark(self, image: PILImage.Image) -> PILImage.Image:
+        """Add the watermark"""
         margin = [10, 10]
         opacity = 0.6
 
@@ -682,6 +728,8 @@ class Image:
 
 
 class SrcSetImage(Image):
+    """Image in a srcset"""
+
     def __init__(
         self,
         src,
@@ -699,8 +747,11 @@ class SrcSetImage(Image):
 
 
 class ImageSrcSet(list):
+    """List of images in the srcset attribute of an HTML img-tag"""
+
     @property
-    def html_srcset(self):
+    def html_srcset(self) -> str:
+        """The string to put in srcset attribute of the img-tag"""
         items = []
         img: SrcSetImage
         for img in self:
@@ -716,42 +767,65 @@ class ImageSrcSet(list):
 
 
 class SourceImage:
+    """
+    A source image
+
+    - Detect mime-type
+    - Load caption
+    - Load exif information
+    -
+    """
+
+    #: Dict to cache the source images, so we only have to process it once
     image_cache: Dict[str, "SourceImage"] = {}
 
     def __init__(self, filename):
+        #: filename of the image
         self.filename = filename
+        #: mime-type of the image
         self.mimetype, _ = mimetypes.guess_type(filename)
         _, _, image_type = self.mimetype.partition("/")
+        #: type of the image. Mostly the second part of the mime-type (jpeg, png, ...)
         self.type = image_type.lower()
 
+        #: Internal caption object
         self._caption = Caption(source_image=self)
+
+        #: Internal exif data
         self._exif = Exif(source_image=self)
+
+        #: Internal exclude list
         self._excluded = ExcludeList(source_image=self)
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
+        """The caption of the image"""
         if self._caption.value is None:
             return None
         return self._caption
 
     @property
-    def exif(self):
+    def exif(self) -> Optional[Exif]:
+        """Exif information"""
         if self._exif.value is None:
             return None
         return self._exif
 
     @property
-    def is_excluded(self):
+    def is_excluded(self) -> bool:
+        """Is the image excluded"""
         if self._excluded.value is None:
             return False
         return True
 
-    def open(self):
+    def open(self) -> PILImage.Image:
+        """Open the image with PIL/Pillow"""
         logger.debug(f"photos: Open file {self.filename}")
         return PILImage.open(self.filename)
 
     @classmethod
-    def from_cache(cls, filename):
+    def from_cache(cls, filename: str) -> "SourceImage":
+        """Create a new SrcImage object or return it from the cache"""
         source_image = cls.image_cache.get(filename)
         if source_image is None:
             source_image = cls(filename=filename)
@@ -761,6 +835,7 @@ class SourceImage:
 
 
 def initialized(pelican: Pelican):
+    """Initialize the default settings"""
     p = os.path.expanduser("~/Pictures")
 
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
@@ -828,6 +903,18 @@ def initialized(pelican: Pelican):
             "PHOTO_DEFAULT_IMAGE_OPTIONS", {"jpeg": {"optimize": True}}
         )
 
+        for name in ("PHOTO_ARTICLE", "PHOTO_GALLERY", "PHOTO_THUMB"):
+            if isinstance(pelican.settings[name], (list, tuple)):
+                logger.info(f"Converting legacy config to new values: {name}")
+                pelican.settings[name] = {
+                    "default": {
+                        "width": pelican.settings[name][0],
+                        "height": pelican.settings[name][1],
+                        "type": "jpeg",
+                        "options": {"quality": pelican.settings[name][2]},
+                    }
+                }
+
     global pelican_settings
     pelican_settings = pelican.settings
     global pelican_output_path
@@ -835,6 +922,10 @@ def initialized(pelican: Pelican):
 
 
 def enqueue_resize(img: Image) -> Image:
+    """
+    Add the image to the resize list. If an image with the same destination filename
+    and the same specifications does already exist it will return this instead.
+    """
     if img.dst not in DEFAULT_CONFIG["queue_resize"]:
         DEFAULT_CONFIG["queue_resize"][img.dst] = img
     elif (
@@ -871,6 +962,8 @@ def build_license(license, author):
 
 
 def resize_photos():
+    """Launch the jobs to process the images in the resize queue"""
+
     def apply_result_info(result: Tuple[str, Dict[str, Any]]):
         key, info = result
         results[key] = info
@@ -913,9 +1006,12 @@ def resize_photos():
 
 
 def detect_content(content):
+    """
+    Find images in the generated content and replace them with the processed images
+    """
     hrefs = None
 
-    def replacer(m):
+    def replacer(m) -> str:
         what = m.group("what")
         value = m.group("value")
         tag = m.group("tag")
@@ -1020,7 +1116,7 @@ def detect_content(content):
         content._content = hrefs.sub(replacer, content._content)
 
 
-def galleries_string_decompose(gallery_string):
+def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
     splitter_regex = re.compile(r"[\s,]*?({photo}|{filename})")
     title_regex = re.compile(r"{(.+)}")
     galleries = map(
@@ -1052,7 +1148,7 @@ def galleries_string_decompose(gallery_string):
         )
 
 
-def process_content_galleries(content: Union[Article, Page], location):
+def process_content_galleries(content: Union[Article, Page], location) -> List[Gallery]:
     """
     Process all galleries attached to an article or page.
 
@@ -1076,6 +1172,8 @@ def process_content_galleries(content: Union[Article, Page], location):
 def detect_content_galleries(
     generator: Union[ArticlesGenerator, PagesGenerator], content: Union[Article, Page]
 ):
+    """Find galleries specified in the meta data or as inline gallery"""
+
     def replace_gallery_string(pattern_match):
         photo_galleries = process_content_galleries(
             content, pattern_match.group("gallery_name")
@@ -1108,47 +1206,30 @@ def detect_content_galleries(
         )
 
 
-def image_clipper(x):
-    return x[8:] if x[8] == "/" else x[7:]
-
-
-def file_clipper(x):
-    return x[11:] if x[10] == "/" else x[10:]
-
-
-def prepare_config(generator: pelican.generators.Generator):
-    for name in ("PHOTO_ARTICLE", "PHOTO_GALLERY", "PHOTO_THUMB"):
-        if isinstance(pelican_settings[name], (list, tuple)):
-            logger.info(f"Converting legacy config to new values: {name}")
-            pelican_settings[name] = {
-                "default": {
-                    "width": pelican_settings[name][0],
-                    "height": pelican_settings[name][1],
-                    "type": "jpeg",
-                    "options": {"quality": pelican_settings[name][2]},
-                }
-            }
-
-
-def process_image(generator, content, image):
-    try:
-        content.photo_image = ArticleImage(
-            content=content, filename=image, generator=generator
-        )
-    except FileNotFound as e:
-        logger.error(f"photo: {str(e)}")
-
-
-def detect_image(generator, content):
+def detect_content_image(generator, content):
+    """Look for article or page photos specified in the meta data"""
     image = content.metadata.get("image", None)
     if image:
         if image.startswith("{photo}") or image.startswith("{filename}"):
-            process_image(generator, content, image)
+            try:
+                content.photo_image = ArticleImage(
+                    content=content, filename=image, generator=generator
+                )
+            except (FileNotFound, InternalError) as e:
+                logger.error(f"photo: {str(e)}")
         else:
             logger.error(f"photos: Image tag not recognized: {image}")
 
 
-def detect_images_and_galleries(generators):
+def image_clipper(x: str) -> str:
+    return x[8:] if x[8] == "/" else x[7:]
+
+
+def file_clipper(x: str) -> str:
+    return x[11:] if x[10] == "/" else x[10:]
+
+
+def detect_content_images_and_galleries(generators: List[pelican.generators.Generator]):
     """Runs generator on both pages and articles."""
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
@@ -1156,28 +1237,26 @@ def detect_images_and_galleries(generators):
             for article in itertools.chain(
                 generator.articles, generator.translations, generator.drafts
             ):
-                detect_image(generator, article)
+                detect_content_image(generator, article)
                 detect_content_galleries(generator, article)
         elif isinstance(generator, PagesGenerator):
             page: Page
             for page in itertools.chain(
                 generator.pages, generator.translations, generator.hidden_pages
             ):
-                detect_image(generator, page)
+                detect_content_image(generator, page)
                 detect_content_galleries(generator, page)
 
 
-def handle_signal_all_generators_finalized(generators: pelican.generators.Generator):
-    detect_images_and_galleries(generators)
+def handle_signal_all_generators_finalized(
+    generators: List[pelican.generators.Generator],
+):
+    detect_content_images_and_galleries(generators)
     resize_photos()
 
 
 def register():
     """Uses the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
-    try:
-        signals.generator_init.connect(prepare_config)
-        signals.content_object_init.connect(detect_content)
-        signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)
-    except Exception as e:
-        logger.exception(f"Plugin failed to execute: {pprint.pformat(e)}")
+    signals.content_object_init.connect(detect_content)
+    signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)
