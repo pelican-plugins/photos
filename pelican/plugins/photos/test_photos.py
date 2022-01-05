@@ -38,12 +38,9 @@ class TestPhotos(unittest.TestCase):
             theme=cls.settings["THEME"],
             output_path=cls.settings["OUTPUT_PATH"],
         )
-        photos.prepare_config(cls.generator)
         photos.register()
         cls.generator.generate_context()
-        for article in cls.generator.articles:
-            photos.detect_image(cls.generator, article)
-            photos.detect_content_galleries(cls.generator, article)
+        photos.handle_signal_all_generators_finalized([cls.generator])
 
     @classmethod
     def tearDownClass(cls):
