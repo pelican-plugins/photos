@@ -1011,7 +1011,7 @@ def detect_content(content):
     """
     hrefs = None
 
-    def replacer(m: re.Match) -> str:
+    def replacer(m) -> str:
         what = m.group("what")
         value = m.group("value")
         tag = m.group("tag")
