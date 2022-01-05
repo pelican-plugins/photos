@@ -55,15 +55,19 @@ class ImageExcluded(Exception):
 
 
 class ArticleImage:
+    """Images/photos on the top of an article or page.
+
+    :param content: Internal content object
+    :param filename: The filename of the image
+    :param generator: The generator
+    """
+
     def __init__(
         self,
         content: pelican.contents.Content,
         filename: str,
         generator: pelican.generators.Generator,
     ):
-        """
-        Images/photos on the top of an article or page.
-        """
         self._filename = filename
         if filename.startswith("{photo}"):
             path = os.path.join(
@@ -243,15 +247,16 @@ class ContentImageLightbox:
 
 
 class Gallery:
-    def __init__(self, content: Union[Article, Page], location_parsed):
-        """
-        Process a single gallery
+    """
+    Process a single gallery
 
-        - look for images
-        - read meta data
-        - read exif data
-        - enqueue the images to be processed
-        """
+    - look for images
+    - read meta data
+    - read exif data
+    - enqueue the images to be processed
+    """
+
+    def __init__(self, content: Union[Article, Page], location_parsed):
         self.content = content
 
         if location_parsed["type"] == "{photo}":
@@ -302,8 +307,16 @@ class Gallery:
 
 
 class GalleryImage:
+    """
+    Image of a gallery
+
+    """
+
     def __init__(self, filename, gallery: Gallery):
+        #: The gallery this image belongs to
         self._gallery = gallery
+
+        #: The filename of the image
         self.filename = filename
 
         img = Image(
@@ -315,6 +328,8 @@ class GalleryImage:
         )
         if img.is_excluded:
             raise ImageExcluded("Image excluded from gallery")
+
+        #: The image object
         self.image = enqueue_resize(img)
 
         img = Image(
@@ -324,6 +339,7 @@ class GalleryImage:
             ),
             specs=pelican_settings["PHOTO_THUMB"],
         )
+        #: The thumbnail
         self.thumb = enqueue_resize(img)
 
     def __getitem__(self, item):
@@ -356,11 +372,17 @@ class GalleryImage:
         return self.image.exif
 
     @property
-    def is_excluded(self):
+    def is_excluded(self) -> bool:
+        """Is the image is excluded from the gallery"""
         return self.image.is_excluded
 
 
 class Image:
+    """
+    The main Image class to hold all information of the generated image and to process
+    the image.
+    """
+
     def __init__(
         self,
         src,
@@ -371,6 +393,7 @@ class Image:
         if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
 
+        #: The source image
         self.source_image = SourceImage.from_cache(src)
         self.dst = dst
 
@@ -384,7 +407,10 @@ class Image:
             if spec is None:
                 spec = specs["default"]
 
+        #: The specification how to transform the source image
         self.spec: Dict[str, Any] = spec.copy()
+
+        #: Image type e.g. jpeg, webp
         self.type = spec["type"].lower()
 
         image_options: Dict[str, Any] = pelican_settings[
@@ -405,6 +431,7 @@ class Image:
         if not isinstance(srcset_specs, (list, tuple)):
             srcset_specs = []
 
+        #: The srcset for the image used in HTML
         self.srcset = ImageSrcSet()
         for srcset_spec in srcset_specs:
             img = SrcSetImage(
@@ -412,6 +439,7 @@ class Image:
             )
             self.srcset.append(enqueue_resize(img))
 
+        #: The name of the output file
         self.output_filename = "{filename}.{extension}".format(
             filename=os.path.join(pelican_output_path, self.dst),
             extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
@@ -419,6 +447,7 @@ class Image:
             ),
         )
 
+        #: The name and path for the web page
         self.web_filename = "{resized}.{extension}".format(
             resized=self.dst,
             extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
@@ -451,13 +480,15 @@ class Image:
         )
 
     @property
-    def height(self):
+    def height(self) -> int:
+        """Height of the image"""
         if self._height is None:
             self._load_result_info()
         return self._height
 
     @property
-    def width(self):
+    def width(self) -> int:
+        """Width of the image"""
         if self._width is None:
             self._load_result_info()
         return self._width
