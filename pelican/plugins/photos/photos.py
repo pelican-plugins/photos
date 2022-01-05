@@ -201,6 +201,7 @@ class ExcludeList(BaseNote):
 
 class ContentImage:
     def __init__(self, filename):
+        #: Filename
         self.filename = filename
         self._src_filename = os.path.join(
             os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]), self.filename
@@ -242,7 +243,7 @@ class ContentImageLightbox:
         self.thumb = enqueue_resize(img)
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
         return self.image.caption
 
 
@@ -364,11 +365,11 @@ class GalleryImage:
         raise IndexError
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
         return self.image.caption
 
     @property
-    def exif(self):
+    def exif(self) -> Optional[Exif]:
         return self.image.exif
 
     @property
@@ -459,19 +460,21 @@ class Image:
         return self.web_filename
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
+        """Caption of the image"""
         return self.source_image.caption
 
     @property
-    def exif(self):
+    def exif(self) -> Optional[Exif]:
         return self.source_image.exif
 
     @property
-    def is_excluded(self):
+    def is_excluded(self) -> bool:
+        """Is the image on the exclude-list"""
         return self.source_image.is_excluded
 
     @staticmethod
-    def is_alpha(img):
+    def is_alpha(img: PILImage.Image) -> bool:
         return (
             True
             if img.mode in ("RGBA", "LA")
@@ -494,17 +497,22 @@ class Image:
         return self._width
 
     def _load_result_info(self):
+        """Load the information from the result image"""
         img: PILImage.Image = PILImage.open(self.output_filename)
         self._height = img.height
         self._width = img.width
 
     def apply_result_info(self, info: Dict[str, Any]):
+        """
+        Apply the information from the result image if it has been processed in a
+        different process.
+        """
         allowed_names = ("_height", "_width")
         for name in allowed_names:
             if name in info:
                 setattr(self, name, info[name])
 
-    def manipulate_exif(self, img):
+    def manipulate_exif(self, img: PILImage.Image) -> Tuple[PILImage.Image, str]:
         try:
             exif = piexif.load(img.info["exif"])
         except Exception:
@@ -535,11 +543,12 @@ class Image:
 
         return img, piexif.dump(exif)
 
-    def process(self, key):
+    def process(self, key: str) -> Tuple[str, Dict[str, Any]]:
+        """Process the image"""
         self.resize()
         return key, {"_height": self._height, "_width": self._width}
 
-    def reduce_opacity(self, im, opacity):
+    def reduce_opacity(self, im: PILImage.Image, opacity) -> PILImage.Image:
         """Reduces Opacity.
 
         Returns an image with reduced opacity.
@@ -557,12 +566,14 @@ class Image:
         return im
 
     @staticmethod
-    def remove_alpha(img, bg_color):
+    def remove_alpha(img: PILImage.Image, bg_color) -> PILImage.Image:
+        """Remove the alpha channel"""
         background = PILImage.new("RGB", img.size, bg_color)
         background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
         return background
 
     def resize(self):
+        """Resize the image"""
         spec = self.spec
 
         process = multiprocessing.current_process()
@@ -633,7 +644,8 @@ class Image:
         self._width = im.width
 
     @staticmethod
-    def rotate(img, exif_dict):
+    def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
+        """Rotate the image with the information from exif data"""
         if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
             orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
             if orientation == 2:
@@ -653,7 +665,8 @@ class Image:
 
         return img, exif_dict
 
-    def watermark(self, image):
+    def watermark(self, image: PILImage.Image) -> PILImage.Image:
+        """Add the watermark"""
         margin = [10, 10]
         opacity = 0.6
 
@@ -715,6 +728,8 @@ class Image:
 
 
 class SrcSetImage(Image):
+    """Image in a srcset"""
+
     def __init__(
         self,
         src,
@@ -732,8 +747,11 @@ class SrcSetImage(Image):
 
 
 class ImageSrcSet(list):
+    """List of images in the srcset attribute of an HTML img-tag"""
+
     @property
-    def html_srcset(self):
+    def html_srcset(self) -> str:
+        """The string to put in srcset attribute of the img-tag"""
         items = []
         img: SrcSetImage
         for img in self:
@@ -749,42 +767,65 @@ class ImageSrcSet(list):
 
 
 class SourceImage:
+    """
+    A source image
+
+    - Detect mime-type
+    - Load caption
+    - Load exif information
+    -
+    """
+
+    #: Dict to cache the source images, so we only have to process it once
     image_cache: Dict[str, "SourceImage"] = {}
 
     def __init__(self, filename):
+        #: filename of the image
         self.filename = filename
+        #: mime-type of the image
         self.mimetype, _ = mimetypes.guess_type(filename)
         _, _, image_type = self.mimetype.partition("/")
+        #: type of the image. Mostly the second part of the mime-type (jpeg, png, ...)
         self.type = image_type.lower()
 
+        #: Internal caption object
         self._caption = Caption(source_image=self)
+
+        #: Internal exif data
         self._exif = Exif(source_image=self)
+
+        #: Internal exclude list
         self._excluded = ExcludeList(source_image=self)
 
     @property
-    def caption(self):
+    def caption(self) -> Optional[Caption]:
+        """The caption of the image"""
         if self._caption.value is None:
             return None
         return self._caption
 
     @property
-    def exif(self):
+    def exif(self) -> Optional[Exif]:
+        """Exif information"""
         if self._exif.value is None:
             return None
         return self._exif
 
     @property
-    def is_excluded(self):
+    def is_excluded(self) -> bool:
+        """Is the image excluded"""
         if self._excluded.value is None:
             return False
         return True
 
-    def open(self):
+    def open(self) -> PILImage.Image:
+        """Open the image with PIL/Pillow"""
         logger.debug(f"photos: Open file {self.filename}")
         return PILImage.open(self.filename)
 
     @classmethod
-    def from_cache(cls, filename):
+    def from_cache(cls, filename: str) -> "SourceImage":
+        """Create a new SrcImage object or return it from the cache"""
         source_image = cls.image_cache.get(filename)
         if source_image is None:
             source_image = cls(filename=filename)
@@ -794,6 +835,7 @@ class SourceImage:
 
 
 def initialized(pelican: Pelican):
+    """Initialize the default settings"""
     p = os.path.expanduser("~/Pictures")
 
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
@@ -880,6 +922,10 @@ def initialized(pelican: Pelican):
 
 
 def enqueue_resize(img: Image) -> Image:
+    """
+    Add the image to the resize list. If an image with the same destination filename
+    and the same specifications does already exist it will return this instead.
+    """
     if img.dst not in DEFAULT_CONFIG["queue_resize"]:
         DEFAULT_CONFIG["queue_resize"][img.dst] = img
     elif (
@@ -916,6 +962,8 @@ def build_license(license, author):
 
 
 def resize_photos():
+    """Launch the jobs to process the images in the resize queue"""
+
     def apply_result_info(result: Tuple[str, Dict[str, Any]]):
         key, info = result
         results[key] = info
@@ -958,9 +1006,12 @@ def resize_photos():
 
 
 def detect_content(content):
+    """
+    Find images in the generated content and replace them with the processed images
+    """
     hrefs = None
 
-    def replacer(m):
+    def replacer(m: re.Match) -> str:
         what = m.group("what")
         value = m.group("value")
         tag = m.group("tag")
@@ -1065,7 +1116,7 @@ def detect_content(content):
         content._content = hrefs.sub(replacer, content._content)
 
 
-def galleries_string_decompose(gallery_string):
+def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
     splitter_regex = re.compile(r"[\s,]*?({photo}|{filename})")
     title_regex = re.compile(r"{(.+)}")
     galleries = map(
@@ -1097,7 +1148,7 @@ def galleries_string_decompose(gallery_string):
         )
 
 
-def process_content_galleries(content: Union[Article, Page], location):
+def process_content_galleries(content: Union[Article, Page], location) -> List[Gallery]:
     """
     Process all galleries attached to an article or page.
 
@@ -1121,6 +1172,8 @@ def process_content_galleries(content: Union[Article, Page], location):
 def detect_content_galleries(
     generator: Union[ArticlesGenerator, PagesGenerator], content: Union[Article, Page]
 ):
+    """Find galleries specified in the meta data or as inline gallery"""
+
     def replace_gallery_string(pattern_match):
         photo_galleries = process_content_galleries(
             content, pattern_match.group("gallery_name")
@@ -1154,6 +1207,7 @@ def detect_content_galleries(
 
 
 def detect_content_image(generator, content):
+    """Look for article or page photos specified in the meta data"""
     image = content.metadata.get("image", None)
     if image:
         if image.startswith("{photo}") or image.startswith("{filename}"):
@@ -1167,11 +1221,11 @@ def detect_content_image(generator, content):
             logger.error(f"photos: Image tag not recognized: {image}")
 
 
-def image_clipper(x):
+def image_clipper(x: str) -> str:
     return x[8:] if x[8] == "/" else x[7:]
 
 
-def file_clipper(x):
+def file_clipper(x: str) -> str:
     return x[11:] if x[10] == "/" else x[10:]
 
 
