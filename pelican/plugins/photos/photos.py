@@ -1144,7 +1144,7 @@ def file_clipper(x):
     return x[11:] if x[10] == "/" else x[10:]
 
 
-def detect_content_images_and_galleries(generators):
+def detect_content_images_and_galleries(generators: List[pelican.generators.Generator]):
     """Runs generator on both pages and articles."""
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
@@ -1163,7 +1163,9 @@ def detect_content_images_and_galleries(generators):
                 detect_content_galleries(generator, page)
 
 
-def handle_signal_all_generators_finalized(generators: pelican.generators.Generator):
+def handle_signal_all_generators_finalized(
+    generators: List[pelican.generators.Generator],
+):
     detect_content_images_and_galleries(generators)
     resize_photos()
 
