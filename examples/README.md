@@ -29,3 +29,11 @@ If everything has been successful you can start the build process.
 ```shell
 make devserver
 ```
+
+License
+-------
+
+Code from the following projects has been included in this example
+
+- https://zeptojs.com/ - MIT
+- https://dimsemenov.com/plugins/magnific-popup/ - MIT

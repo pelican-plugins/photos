@@ -7,6 +7,9 @@
         <meta name="generator" content="Pelican" />
         <title>{% block title %}{{ SITENAME }}{%endblock%}</title>
         <link rel="stylesheet" href="{{ SITEURL }}/{{ THEME_STATIC_DIR }}/css/{{ CSS_FILE }}" />
+        <!-- >>>> Start >>>>> PHOTO plugin: lightbox style >>>>>>>>> -->
+        <link rel="stylesheet" href="{{ SITEURL }}/{{ THEME_STATIC_DIR }}/css/magnific-popup.css" />
+        <!-- <<<< End <<<<< PHOTO plugin: lightbox style <<<<<<<<< -->
         {% if FEED_ALL_ATOM %}
         <link href="{{ FEED_DOMAIN }}/{% if FEED_ALL_ATOM_URL %}{{ FEED_ALL_ATOM_URL }}{% else %}{{ FEED_ALL_ATOM }}{% endif %}" type="application/atom+xml" rel="alternate" title="{{ SITENAME }} Atom Feed" />
         {% endif %}
@@ -79,5 +82,6 @@
 
 {% include 'analytics.html' %}
 {% include 'disqus_script.html' %}
+{% include 'lightbox_gallery.html' %}
 </body>
 </html>

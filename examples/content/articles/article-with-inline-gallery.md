@@ -1,7 +1,6 @@
 Title: Article with inline Gallery
 Date: 2022-01-04
 Category: Gallery
-Gallery: {photo}example_gallery/
 Summary: This is an example with an inline gallery.
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Urna habitasse sodales sollicitudin orci tempor fames curabitur quisque netus at suspendisse cubilia diam. Eu suspendisse lacus scelerisque lectus odio libero eget etiam dictumst senectus condimentum.
