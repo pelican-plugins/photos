@@ -25,17 +25,28 @@
            title="Permalink to {{ article.title|striptags }}">{{ article.title }}</a></h1>
       {% include 'twitter.html' %}
     </header>
-
-    <!-- PHOTO plugin: article image -->
-    {% if article.photo_image %}
     <div class="entry-content">
-      <img src="{{ SITEURL }}/{{ article.photo_image[1] }}" />
-    </div>
-    {% endif %}
-    <!-- PHOTO plugin: article image -->
-    <div class="entry-content">
+      <!-- PHOTO plugin: article image -->
+      {% if article.photo_image %}
+        <img src="{{ SITEURL }}/{{ article.photo_image[1] }}" />
+      {% endif %}
+      <!-- PHOTO plugin: article image -->
       {% include 'article_infos.html' %}
       {{ article.content }}
+      {% if article.photo_gallery %}
+      <!-- PHOTO plugin: article gallery -->
+      {% if article.photo_gallery %}
+      <div class="gallery">
+          {% for title, gallery in article.photo_gallery %}
+            <h1>{{ title }}</h1>
+              {% for name, photo, thumb, exif, caption in gallery %}
+                  <a href="{{ SITEURL }}/{{ photo }}" title="{{ name }}" exif="{{ exif }}" caption="{{ caption }}"><img src="{{ SITEURL }}/{{ thumb }}"></a>
+              {% endfor %}
+          {% endfor %}
+      </div>
+      {% endif %}
+      <!-- PHOTO plugin: article gallery -->
+      {% endif %}
     </div><!-- /.entry-content -->
     {% if DISQUS_SITENAME and SITEURL and article.status != "draft" %}
     <div class="comments">

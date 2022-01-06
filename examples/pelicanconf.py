@@ -14,7 +14,16 @@ TIMEZONE = "Europe/Berlin"
 
 DEFAULT_LANG = "en"
 
+# Base settings where to find the galleries with images
 PHOTO_LIBRARY = "content/galleries"
+
+PHOTO_INLINE_GALLERY_ENABLED = True
+# We use the default settings here
+# PHOTO_INLINE_GALLERY_TEMPLATE = "inline_gallery"
+
+# Use the name of the site as watermark text
+PHOTO_WATERMARK = True
+PHOTO_WATERMARK_TEXT = SITENAME
 
 # Feed generation is usually not desired when developing
 FEED_ALL_ATOM = None

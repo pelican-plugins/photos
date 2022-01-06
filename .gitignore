@@ -71,4 +71,4 @@ poetry.lock
 docs/_build/
 examples/output/
 # Exclude downloaded images
-examples/content/galleries/**/*.jpg
+examples/content/galleries/**/*.[jJ][pP][gG]
