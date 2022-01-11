@@ -512,7 +512,9 @@ class Image:
         ]
 
         operations = self.spec.get("operations")
-        if isinstance(operations, (list, tuple)):
+        if operations is None:
+            self.operations = []
+        elif isinstance(operations, (list, tuple)):
             self.operations = operations
         else:
             logger.warning("Wrong data-type for operations, should be list or tuple")
