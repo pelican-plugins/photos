@@ -1,3 +1,4 @@
+import base64
 import datetime
 import itertools
 import json
@@ -402,6 +403,7 @@ class Image:
         self._width: Optional[int] = None
         self._result_info_loaded = False
         self._result_info_allowed_names = ("_average_color", "_height", "_width")
+        self.images = {}
 
         if spec is None:
             if specs is None:
@@ -442,6 +444,18 @@ class Image:
             )
             self.srcset.append(enqueue_resize(img))
 
+        additional_images: Dict[str, Any] = spec.get("images")
+        if additional_images is None:
+            additional_images = {}
+        for add_img_name, add_img_spec in additional_images.items():
+            img = Image(
+                src=self.source_image.filename,
+                dst=f"{self.dst}_{add_img_name}",
+                spec=add_img_spec,
+            )
+            img = enqueue_resize(img)
+            self.images[add_img_name] = img
+
         #: The name of the output file
         self.output_filename = "{filename}.{extension}".format(
             filename=os.path.join(pelican_output_path, self.dst),
@@ -475,6 +489,15 @@ class Image:
     def caption(self) -> Optional[Caption]:
         """Caption of the image"""
         return self.source_image.caption
+
+    @property
+    def data(self) -> bytes:
+        fp = open(self.output_filename, "rb")
+        return fp.read()
+
+    @property
+    def data_base64(self) -> str:
+        return base64.b64encode(self.data).decode("UTF-8")
 
     @property
     def exif(self) -> Optional[Exif]:
