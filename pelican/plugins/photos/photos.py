@@ -175,7 +175,6 @@ class BaseNote:
     cache_class = None
 
     def __init__(self, source_image):
-        print(self.cache_class)
         self.cache = self.cache_class.from_cache(source_image)
         self._value = self.cache.get_value(source_image)
 
@@ -398,8 +397,11 @@ class Image:
         self.source_image = SourceImage.from_cache(src)
         self.dst = dst
 
+        self._average_color = None
         self._height: Optional[int] = None
         self._width: Optional[int] = None
+        self._result_info_loaded = False
+        self._result_info_allowed_names = ("_average_color", "_height", "_width")
 
         if spec is None:
             if specs is None:
@@ -460,6 +462,16 @@ class Image:
         return self.web_filename
 
     @property
+    def average_color(self) -> Optional[str]:
+        """Average color"""
+        if self._average_color is None:
+            self._load_result_info()
+        if self._average_color:
+            return "#{:02x}{:02x}{:02x}".format(*self._average_color)
+        else:
+            return None
+
+    @property
     def caption(self) -> Optional[Caption]:
         """Caption of the image"""
         return self.source_image.caption
@@ -496,21 +508,34 @@ class Image:
             self._load_result_info()
         return self._width
 
-    def _load_result_info(self):
+    def _load_result_info(self, image: Optional[PILImage.Image] = None):
         """Load the information from the result image"""
-        img: PILImage.Image = PILImage.open(self.output_filename)
-        self._height = img.height
-        self._width = img.width
+        if self._result_info_loaded:
+            if image is None:
+                image: PILImage.Image = PILImage.open(self.output_filename)
+
+            if pelican_settings["PHOTO_RESULT_IMAGE_AVERAGE_COLOR"]:
+                image2: PILImage.Image = image.resize((1, 1), PILImage.ANTIALIAS)
+                self._average_color = image2.getpixel((0, 0))
+
+            self._height = image.height
+            self._width = image.width
+
+        results = {}
+        for name in self._result_info_allowed_names:
+            results[name] = getattr(self, name)
+        self._result_info_loaded = True
+        return results
 
     def apply_result_info(self, info: Dict[str, Any]):
         """
         Apply the information from the result image if it has been processed in a
         different process.
         """
-        allowed_names = ("_height", "_width")
-        for name in allowed_names:
+        for name in self._result_info_allowed_names:
             if name in info:
                 setattr(self, name, info[name])
+        self._result_info_loaded = True
 
     def manipulate_exif(self, img: PILImage.Image) -> Tuple[PILImage.Image, str]:
         try:
@@ -545,8 +570,8 @@ class Image:
 
     def process(self, key: str) -> Tuple[str, Dict[str, Any]]:
         """Process the image"""
-        self.resize()
-        return key, {"_height": self._height, "_width": self._width}
+        image: PILImage.Image = self.resize()
+        return key, self._load_result_info(image=image)
 
     def reduce_opacity(self, im: PILImage.Image, opacity) -> PILImage.Image:
         """Reduces Opacity.
@@ -572,7 +597,7 @@ class Image:
         background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
         return background
 
-    def resize(self):
+    def resize(self) -> PILImage.Image:
         """Resize the image"""
         spec = self.spec
 
@@ -640,8 +665,7 @@ class Image:
             # exif=exif_copy,
             **image_options,
         )
-        self._height = im.height
-        self._width = im.width
+        return im
 
     @staticmethod
     def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
@@ -914,6 +938,8 @@ def initialized(pelican: Pelican):
                         "options": {"quality": pelican.settings[name][2]},
                     }
                 }
+
+        pelican.settings.setdefault("PHOTO_RESULT_IMAGE_AVERAGE_COLOR", False)
 
     global pelican_settings
     pelican_settings = pelican.settings

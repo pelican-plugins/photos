@@ -106,6 +106,9 @@ Defaults:
 }
 ```
 
+`PHOTO_RESULT_IMAGE_AVERAGE_COLOR = False`
+: Calculate the average color for an result image. This can be used to provide a default background color while using lazy loading.
+
 The plug-in automatically resizes the photos and publishes them to the following output folder:
 
     ./output/photos
