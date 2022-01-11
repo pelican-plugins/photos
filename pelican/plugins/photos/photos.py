@@ -595,7 +595,8 @@ class Image:
 
             if pelican_settings["PHOTO_RESULT_IMAGE_AVERAGE_COLOR"]:
                 image2: PILImage.Image = image.resize((1, 1), PILImage.ANTIALIAS)
-                self._average_color = image2.getpixel((0, 0))
+                # We need RGB to get red, green and blue values for the pixel
+                self._average_color = image2.convert("RGB").getpixel((0, 0))
 
             self._height = image.height
             self._width = image.width
