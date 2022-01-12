@@ -99,6 +99,7 @@ class ArticleImage:
             src=path,
             dst=os.path.join("photos", thumb),
             specs=pelican_settings["PHOTO_THUMB"],
+            is_thumb=True,
         )
         self.thumb = enqueue_resize(img)
         self.file = os.path.basename(image).lower()
@@ -239,6 +240,7 @@ class ContentImageLightbox:
             src=self._src_filename,
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "t"),
             specs=pelican_settings["PHOTO_THUMB"],
+            is_thumb=True,
         )
         self.thumb = enqueue_resize(img)
 
@@ -339,6 +341,7 @@ class GalleryImage:
                 self._gallery.dst_dir, os.path.splitext(filename)[0].lower() + "t"
             ),
             specs=pelican_settings["PHOTO_THUMB"],
+            is_thumb=True,
         )
         #: The thumbnail
         self.thumb = enqueue_resize(img)
@@ -390,6 +393,7 @@ class Image:
         dst,
         spec: Optional[Dict[str, Any]] = None,
         specs: Optional[Dict[str, Dict[str, Any]]] = None,
+        is_thumb=False,
     ):
         if spec is not None and specs is not None:
             raise ValueError("Both spec and specs must not be provided")
@@ -397,6 +401,7 @@ class Image:
         #: The source image
         self.source_image = SourceImage.from_cache(src)
         self.dst = dst
+        self.is_thumb = is_thumb
 
         self._average_color = None
         self._height: Optional[int] = None
@@ -440,7 +445,10 @@ class Image:
         self.srcset = ImageSrcSet()
         for srcset_spec in srcset_specs:
             img = SrcSetImage(
-                src=self.source_image.filename, dst=self.dst, spec=srcset_spec
+                src=self.source_image.filename,
+                dst=self.dst,
+                spec=srcset_spec,
+                is_thumb=self.is_thumb,
             )
             self.srcset.append(enqueue_resize(img))
 
@@ -452,6 +460,7 @@ class Image:
                 src=self.source_image.filename,
                 dst=f"{self.dst}_{add_img_name}",
                 spec=add_img_spec,
+                is_thumb=self.is_thumb,
             )
             img = enqueue_resize(img)
             self.images[add_img_name] = img
@@ -471,6 +480,53 @@ class Image:
                 self.type, self.type
             ),
         )
+
+        self.pre_operations = []
+        if self.is_thumb and pelican_settings["PHOTO_SQUARE_THUMB"]:
+            self.pre_operations += [
+                (
+                    "ops.fit",
+                    {
+                        "size": (spec["width"], spec["height"]),
+                        "method": PILImage.ANTIALIAS,
+                    },
+                ),
+            ]
+        else:
+            self.pre_operations += [
+                (
+                    "main.resize",
+                    {
+                        "size": (spec["width"], spec["height"]),
+                        "resample": PILImage.ANTIALIAS,
+                    },
+                )
+            ]
+
+        self.pre_operations += [
+            "main.remove_alpha",
+        ]
+
+        self.post_operations = [
+            "main.watermark",
+        ]
+
+        operations = self.spec.get("operations")
+        if operations is None:
+            self.operations = []
+        elif isinstance(operations, (list, tuple)):
+            self.operations = operations
+        else:
+            logger.warning("Wrong data-type for operations, should be list or tuple")
+            self.operations = []
+
+        self.operation_mappings = {
+            "main.remove_alpha": self._operation_remove_alpha,
+            "main.resize": self._operation_resize,
+            "main.watermark": self._operation_watermark,
+            "ops.greyscale": ImageOps.grayscale,
+            "ops.fit": ImageOps.fit,
+        }
 
     def __str__(self):
         return self.web_filename
@@ -539,7 +595,8 @@ class Image:
 
             if pelican_settings["PHOTO_RESULT_IMAGE_AVERAGE_COLOR"]:
                 image2: PILImage.Image = image.resize((1, 1), PILImage.ANTIALIAS)
-                self._average_color = image2.getpixel((0, 0))
+                # We need RGB to get red, green and blue values for the pixel
+                self._average_color = image2.convert("RGB").getpixel((0, 0))
 
             self._height = image.height
             self._width = image.width
@@ -593,7 +650,70 @@ class Image:
 
     def process(self, key: str) -> Tuple[str, Dict[str, Any]]:
         """Process the image"""
-        image: PILImage.Image = self.resize()
+        process = multiprocessing.current_process()
+        logger.info(
+            f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
+            f"-> {self.output_filename}"
+        )
+
+        if os.path.isfile(self.output_filename) and os.path.getmtime(
+            self.source_image.filename
+        ) <= os.path.getmtime(self.output_filename):
+            logger.debug(
+                f"Skipping orig: {os.path.getmtime(self.source_image.filename)} "
+                f"{os.path.getmtime(self.output_filename)}"
+            )
+            return key, self._load_result_info()
+
+        image = self.source_image.open()
+        operations = self.pre_operations + self.operations + self.post_operations
+        for i, operation in enumerate(operations):
+            operation_args = []
+            operation_kwargs = {}
+            if isinstance(operation, str):
+                operation_name = operation
+            else:
+                operation_name = operation[0]
+                if len(operation) > 1:
+                    if isinstance(operation[1], (list, tuple)):
+                        operation_args = operation[1]
+                    elif isinstance(operation[1], (dict,)):
+                        operation_kwargs = operation[1]
+                if len(operation) > 2 and operation_name[2] is not None:
+                    operation_kwargs = operation[2]
+
+            logger.debug(f"Processing({self.output_filename}): {i}={operation_name}")
+            func = self.operation_mappings.get(operation_name)
+            image = func(image, *operation_args, **operation_kwargs)
+
+        image_options = self.spec.get("options", {})
+        directory = os.path.dirname(self.output_filename)
+        if not os.path.exists(directory):
+            try:
+                os.makedirs(directory, exist_ok=True)
+            except Exception:
+                logger.exception(f"Could not create {directory}")
+
+        # if (
+        #     ispiexif and pelican_settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
+        # ):  # Only works with JPEG exif for sure.
+        #     try:
+        #         im, exif_copy = manipulate_exif(im)
+        #     except Exception:
+        #         logger.info(f"photos: no EXIF or EXIF error in {orig}")
+        #         exif_copy = b""
+        # else:
+        #     exif_copy = b""
+        #
+        # icc_profile = im.info.get("icc_profile", None)
+
+        image.save(
+            self.output_filename,
+            self.type,
+            # icc_profile=icc_profile,
+            # exif=exif_copy,
+            **image_options,
+        )
         return key, self._load_result_info(image=image)
 
     def reduce_opacity(self, im: PILImage.Image, opacity) -> PILImage.Image:
@@ -613,82 +733,20 @@ class Image:
         im.putalpha(alpha)
         return im
 
-    @staticmethod
-    def remove_alpha(img: PILImage.Image, bg_color) -> PILImage.Image:
+    def _operation_remove_alpha(self, image: PILImage.Image) -> PILImage.Image:
         """Remove the alpha channel"""
-        background = PILImage.new("RGB", img.size, bg_color)
-        background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
+        if not self.is_alpha(image):
+            return image
+        background = PILImage.new(
+            "RGB", image.size, pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"]
+        )
+        background.paste(image, mask=image.split()[3])  # 3 is the alpha channel
         return background
 
-    def resize(self) -> PILImage.Image:
-        """Resize the image"""
-        spec = self.spec
-
-        process = multiprocessing.current_process()
-        logger.info(
-            f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
-            f"-> {self.output_filename}"
-        )
-
-        if os.path.isfile(self.output_filename) and os.path.getmtime(
-            self.source_image.filename
-        ) <= os.path.getmtime(self.output_filename):
-            logger.debug(
-                f"Skipping orig: {os.path.getmtime(self.source_image.filename)} "
-                f"{os.path.getmtime(self.output_filename)}"
-            )
-            self._load_result_info()
-            return
-
-        im = self.source_image.open()
-
-        # if (
-        #     ispiexif and pelican_settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
-        # ):  # Only works with JPEG exif for sure.
-        #     try:
-        #         im, exif_copy = manipulate_exif(im)
-        #     except Exception:
-        #         logger.info(f"photos: no EXIF or EXIF error in {orig}")
-        #         exif_copy = b""
-        # else:
-        #     exif_copy = b""
-        #
-        # icc_profile = im.info.get("icc_profile", None)
-
-        if (
-            pelican_settings["PHOTO_SQUARE_THUMB"]
-            and spec == pelican_settings["PHOTO_THUMB"]
-        ):
-            im = ImageOps.fit(im, (spec["width"], spec["height"]), PILImage.ANTIALIAS)
-
-        im.thumbnail((spec["width"], spec["height"]), PILImage.ANTIALIAS)
-
-        if self.is_alpha(im):
-            im = self.remove_alpha(im, pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"])
-
-        directory = os.path.dirname(self.output_filename)
-        if not os.path.exists(directory):
-            try:
-                os.makedirs(directory)
-            except Exception:
-                logger.exception(f"Could not create {directory}")
-        else:
-            logger.debug(f"Directory already exists at {os.path.split(directory)[0]}")
-
-        if pelican_settings["PHOTO_WATERMARK"]:
-            isthumb = True if spec == pelican_settings["PHOTO_THUMB"] else False
-            if not isthumb or (isthumb and pelican_settings["PHOTO_WATERMARK_THUMB"]):
-                im = self.watermark(im)
-
-        image_options = spec.get("options", {})
-        im.save(
-            self.output_filename,
-            self.type,
-            # icc_profile=icc_profile,
-            # exif=exif_copy,
-            **image_options,
-        )
-        return im
+    @staticmethod
+    def _operation_resize(image, *args, **kwargs):
+        image.thumbnail(*args, **kwargs)
+        return image
 
     @staticmethod
     def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
@@ -712,8 +770,12 @@ class Image:
 
         return img, exif_dict
 
-    def watermark(self, image: PILImage.Image) -> PILImage.Image:
+    def _operation_watermark(self, image: PILImage.Image) -> PILImage.Image:
         """Add the watermark"""
+        if not pelican_settings["PHOTO_WATERMARK"]:
+            return image
+        if self.is_thumb and not pelican_settings["PHOTO_WATERMARK_THUMB"]:
+            return image
         margin = [10, 10]
         opacity = 0.6
 
@@ -782,6 +844,7 @@ class SrcSetImage(Image):
         src,
         dst,
         spec: Optional[Dict[str, Any]] = None,
+        is_thumb=False,
     ):
         self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
 
@@ -790,7 +853,7 @@ class SrcSetImage(Image):
             dst_suffix = self.descriptor
 
         dst = f"{dst}_{dst_suffix}"
-        super().__init__(src=src, dst=dst, spec=spec)
+        super().__init__(src=src, dst=dst, spec=spec, is_thumb=is_thumb)
 
 
 class ImageSrcSet(list):
@@ -1018,8 +1081,8 @@ def resize_photos():
         results[key] = info
 
     def error_callback(e: BaseException):
-        logger.warning(f"photos: {e}")
-        logger.debug("photos: An exception occurred", exc_info=e)
+        logger.error(f"photos: {e}")
+        logger.warning("photos: An exception occurred", exc_info=e)
 
     debug = False
     resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
