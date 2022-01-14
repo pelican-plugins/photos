@@ -7,6 +7,7 @@ import mimetypes
 import multiprocessing
 import os
 import pprint
+import queue
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 import urllib.parse
@@ -21,6 +22,10 @@ from pelican.utils import pelican_open
 logger = logging.getLogger(__name__)
 pelican_settings: Dict[str, Any] = {}
 pelican_output_path: Optional[str] = None
+pelican_photo_inline_galleries = {}
+g_generator = None
+g_image_queue = queue.Queue()
+
 
 try:
     from PIL import Image as PILImage
@@ -67,7 +72,6 @@ class ArticleImage:
         self,
         content: pelican.contents.Content,
         filename: str,
-        generator: pelican.generators.Generator,
     ):
         self._filename = filename
         if filename.startswith("{photo}"):
@@ -78,7 +82,7 @@ class ArticleImage:
             image = image_clipper(filename)
         elif filename.startswith("{filename}"):
             path = os.path.join(
-                generator.path, content.relative_dir, file_clipper(filename)
+                g_generator.path, content.relative_dir, file_clipper(filename)
             )
             image = file_clipper(filename)
         else:
@@ -94,14 +98,14 @@ class ArticleImage:
             dst=os.path.join("photos", photo),
             specs=pelican_settings["PHOTO_ARTICLE"],
         )
-        self.image = enqueue_resize(img)
+        self.image = enqueue_image(img)
         img = Image(
             src=path,
             dst=os.path.join("photos", thumb),
             specs=pelican_settings["PHOTO_THUMB"],
             is_thumb=True,
         )
-        self.thumb = enqueue_resize(img)
+        self.thumb = enqueue_image(img)
         self.file = os.path.basename(image).lower()
 
     def __getitem__(self, index):
@@ -216,7 +220,7 @@ class ContentImage:
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower() + "a"),
             specs=pelican_settings["PHOTO_ARTICLE"],
         )
-        self.image = enqueue_resize(img)
+        self.image = enqueue_image(img)
 
 
 class ContentImageLightbox:
@@ -234,7 +238,7 @@ class ContentImageLightbox:
             dst=os.path.join("photos", os.path.splitext(filename)[0].lower()),
             specs=pelican_settings["PHOTO_GALLERY"],
         )
-        self.image = enqueue_resize(img)
+        self.image = enqueue_image(img)
 
         img = Image(
             src=self._src_filename,
@@ -242,7 +246,7 @@ class ContentImageLightbox:
             specs=pelican_settings["PHOTO_THUMB"],
             is_thumb=True,
         )
-        self.thumb = enqueue_resize(img)
+        self.thumb = enqueue_image(img)
 
     @property
     def caption(self) -> Optional[Caption]:
@@ -333,7 +337,7 @@ class GalleryImage:
             raise ImageExcluded("Image excluded from gallery")
 
         #: The image object
-        self.image = enqueue_resize(img)
+        self.image = enqueue_image(img)
 
         img = Image(
             src=os.path.join(self._gallery.src_dir, self.filename),
@@ -344,7 +348,7 @@ class GalleryImage:
             is_thumb=True,
         )
         #: The thumbnail
-        self.thumb = enqueue_resize(img)
+        self.thumb = enqueue_image(img)
 
     def __getitem__(self, item):
         """
@@ -450,7 +454,7 @@ class Image:
                 spec=srcset_spec,
                 is_thumb=self.is_thumb,
             )
-            self.srcset.append(enqueue_resize(img))
+            self.srcset.append(enqueue_image(img))
 
         additional_images: Dict[str, Any] = spec.get("images")
         if additional_images is None:
@@ -462,7 +466,7 @@ class Image:
                 spec=add_img_spec,
                 is_thumb=self.is_thumb,
             )
-            img = enqueue_resize(img)
+            img = enqueue_image(img)
             self.images[add_img_name] = img
 
         #: The name of the output file
@@ -648,7 +652,7 @@ class Image:
 
         return img, piexif.dump(exif)
 
-    def process(self, key: str) -> Tuple[str, Dict[str, Any]]:
+    def process(self) -> Tuple[str, Dict[str, Any]]:
         """Process the image"""
         process = multiprocessing.current_process()
         logger.info(
@@ -663,7 +667,7 @@ class Image:
                 f"Skipping orig: {os.path.getmtime(self.source_image.filename)} "
                 f"{os.path.getmtime(self.output_filename)}"
             )
-            return key, self._load_result_info()
+            return self.dst, self._load_result_info()
 
         image = self.source_image.open()
         operations = self.pre_operations + self.operations + self.post_operations
@@ -714,7 +718,7 @@ class Image:
             # exif=exif_copy,
             **image_options,
         )
-        return key, self._load_result_info(image=image)
+        return self.dst, self._load_result_info(image=image)
 
     def reduce_opacity(self, im: PILImage.Image, opacity) -> PILImage.Image:
         """Reduces Opacity.
@@ -970,7 +974,7 @@ def initialized(pelican: Pelican):
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
-    DEFAULT_CONFIG["queue_resize"] = {}
+    DEFAULT_CONFIG["image_cache"] = {}
     DEFAULT_CONFIG["created_galleries"] = {}
     DEFAULT_CONFIG["plugin_dir"] = os.path.dirname(os.path.realpath(__file__))
 
@@ -1033,22 +1037,23 @@ def initialized(pelican: Pelican):
     pelican_output_path = pelican.output_path
 
 
-def enqueue_resize(img: Image) -> Image:
+def enqueue_image(img: Image) -> Image:
     """
     Add the image to the resize list. If an image with the same destination filename
     and the same specifications does already exist it will return this instead.
     """
-    if img.dst not in DEFAULT_CONFIG["queue_resize"]:
-        DEFAULT_CONFIG["queue_resize"][img.dst] = img
+    if img.dst not in DEFAULT_CONFIG["image_cache"]:
+        DEFAULT_CONFIG["image_cache"][img.dst] = img
+        g_image_queue.put(img)
     elif (
-        DEFAULT_CONFIG["queue_resize"][img.dst].source_image != img.source_image
-        or DEFAULT_CONFIG["queue_resize"][img.dst].spec != img.spec
+        DEFAULT_CONFIG["image_cache"][img.dst].source_image != img.source_image
+        or DEFAULT_CONFIG["image_cache"][img.dst].spec != img.spec
     ):
         raise InternalError(
             "resize conflict for {}, {}-{} is not {}-{}".format(
                 img.dst,
-                DEFAULT_CONFIG["queue_resize"][img.dst].source_image.filename,
-                DEFAULT_CONFIG["queue_resize"][img.dst].spec,
+                DEFAULT_CONFIG["image_cache"][img.dst].source_image.filename,
+                DEFAULT_CONFIG["image_cache"][img.dst].spec,
                 img.source_image.filename,
                 img.spec,
             )
@@ -1073,7 +1078,7 @@ def build_license(license, author):
         )
 
 
-def resize_photos():
+def process_image_queue():
     """Launch the jobs to process the images in the resize queue"""
 
     def apply_result_info(result: Tuple[str, Dict[str, Any]]):
@@ -1097,41 +1102,60 @@ def resize_photos():
 
     pool = multiprocessing.Pool(processes=resize_job_number)
     logger.debug(f"Debug Status: {debug}")
-    logger.info(f"photos: {len(DEFAULT_CONFIG['queue_resize'])} images in resize queue")
+    logger.info(f"photos: {len(DEFAULT_CONFIG['image_cache'])} images in resize queue")
     results = {}
-    for img_key, img in DEFAULT_CONFIG["queue_resize"].items():
+    while not g_image_queue.empty():
+        image = g_image_queue.get()
         if debug:
-            apply_result_info(img.process(img_key))
+            apply_result_info(image.process())
         else:
             pool.apply_async(
-                img.process,
-                args=(img_key,),
+                image.process,
                 callback=apply_result_info,
                 error_callback=error_callback,
             )
+        g_image_queue.task_done()
 
     pool.close()
     pool.join()
     logger.info("photos: Applying results")
     for k, result_info in results.items():
-        DEFAULT_CONFIG["queue_resize"][k].apply_result_info(result_info)
+        DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
 
 
-def detect_content(content):
+def detect_inline_images(content: pelican.contents.Content):
     """
     Find images in the generated content and replace them with the processed images
     """
-    hrefs = None
+    regex = r"""
+        <\s*
+        (?P<tag>[^\s\>]+)  # detect the tag
+        (?P<attrs_before>[^\>]*)
+        (?P<src>href|src)  # match tag with src and href attr
+        \s*=
+        (?P<quote>["\'])  # require value to be quoted
+        (?P<path>{}(?P<value>.*?))  # the url value
+        (?P=quote)
+        (?P<attrs_after>[^\>]*>)
+    """.format(
+        pelican_settings["INTRASITE_LINK_REGEX"]
+    )
+    hrefs = re.compile(regex, re.X)
 
-    def replacer(m) -> str:
+    inline_images = {}
+    if not content._content or not (
+        "{photo}" in content._content or "{lightbox}" in content._content
+    ):
+        return inline_images
+    # content._content = hrefs.sub(replacer, content._content)
+    for m in hrefs.finditer(content._content):
+        tag = m.group("tag")
         what = m.group("what")
         value = m.group("value")
-        tag = m.group("tag")
-        output = m.group(0)
 
         if what not in ("photo", "lightbox"):
             # ToDo: Log unsupported type
-            return output
+            continue
 
         if value.startswith("/"):
             value = value[1:]
@@ -1141,91 +1165,29 @@ def detect_content(content):
                 img = ContentImage(filename=value)
             except FileNotFound as e:
                 logger.error(f"photos: {str(e)}")
-                return output
+                continue
 
-            return "".join(
-                (
-                    "<",
-                    m.group("tag"),
-                    m.group("attrs_before"),
-                    m.group("src"),
-                    "=",
-                    m.group("quote"),
-                    os.path.join(pelican_settings["SITEURL"], img.image.web_filename),
-                    m.group("quote"),
-                    m.group("attrs_after"),
-                )
-            )
+            inline_images[m.group()] = {
+                "match": m,
+                "image": img,
+            }
 
         elif what == "lightbox" and tag == "img":
             try:
                 img = ContentImageLightbox(filename=value)
             except FileNotFound as e:
                 logger.error(f"photos: {str(e)}")
-                return output
+                continue
 
-            lightbox_attr_list = [""]
-
-            gallery_name = value.split("/")[0]
-            lightbox_attr_list.append(
-                '{}="{}"'.format(
-                    pelican_settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name
-                )
-            )
-
-            if img.caption:
-                lightbox_attr_list.append(
-                    '{}="{}"'.format(
-                        pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"],
-                        str(img.caption),
-                    )
-                )
-
-            lightbox_attrs = " ".join(lightbox_attr_list)
-
-            return "".join(
-                (
-                    "<a href=",
-                    m.group("quote"),
-                    os.path.join(pelican_settings["SITEURL"], img.image.web_filename),
-                    m.group("quote"),
-                    lightbox_attrs,
-                    "><img",
-                    m.group("attrs_before"),
-                    "src=",
-                    m.group("quote"),
-                    os.path.join(pelican_settings["SITEURL"], img.thumb.web_filename),
-                    m.group("quote"),
-                    m.group("attrs_after"),
-                    "</a>",
-                )
-            )
+            inline_images[m.group()] = {
+                "match": m,
+                "image": img,
+            }
 
         # else:
         #  logger.error("photos: No photo %s", value)
 
-        return output
-
-    if hrefs is None:
-        regex = r"""
-            <\s*
-            (?P<tag>[^\s\>]+)  # detect the tag
-            (?P<attrs_before>[^\>]*)
-            (?P<src>href|src)  # match tag with src and href attr
-            \s*=
-            (?P<quote>["\'])  # require value to be quoted
-            (?P<path>{}(?P<value>.*?))  # the url value
-            (?P=quote)
-            (?P<attrs_after>[^\>]*>)
-        """.format(
-            pelican_settings["INTRASITE_LINK_REGEX"]
-        )
-        hrefs = re.compile(regex, re.X)
-
-    if content._content and (
-        "{photo}" in content._content or "{lightbox}" in content._content
-    ):
-        content._content = hrefs.sub(replacer, content._content)
+    return inline_images
 
 
 def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
@@ -1281,28 +1243,8 @@ def process_content_galleries(content: Union[Article, Page], location) -> List[G
     return photo_galleries
 
 
-def detect_content_galleries(
-    generator: Union[ArticlesGenerator, PagesGenerator], content: Union[Article, Page]
-):
+def detect_inline_galleries(content: Union[Article, Page]):
     """Find galleries specified in the meta data or as inline gallery"""
-
-    def replace_gallery_string(pattern_match):
-        photo_galleries = process_content_galleries(
-            content, pattern_match.group("gallery_name")
-        )
-        template = generator.get_template(
-            pelican_settings["PHOTO_INLINE_GALLERY_TEMPLATE"]
-        )
-        template_values = {
-            "galleries": photo_galleries,
-        }
-        if isinstance(generator, ArticlesGenerator):
-            template_values["article"] = content
-        elif isinstance(generator, PagesGenerator):
-            template_values["page"] = content
-        return template.render(**template_values)
-
-    # print(content.content)
     if "gallery" in content.metadata:
         gallery = content.metadata.get("gallery")
         if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
@@ -1310,23 +1252,39 @@ def detect_content_galleries(
         elif gallery:
             logger.error(f"photos: Gallery tag not recognized: {gallery}")
 
+    inline_galleries = {}
     if pelican_settings["PHOTO_INLINE_GALLERY_ENABLED"]:
-        content._content = re.sub(
-            pelican_settings["PHOTO_INLINE_GALLERY_PATTERN"],
-            replace_gallery_string,
-            content._content,
+        gallery_strings = re.finditer(
+            pelican_settings["PHOTO_INLINE_GALLERY_PATTERN"], content._content
         )
+        for m in gallery_strings:
+            inline_galleries[str(m.group())] = process_content_galleries(
+                content, m.group("gallery_name")
+            )
+
+    return inline_galleries
 
 
-def detect_content_image(generator, content):
-    """Look for article or page photos specified in the meta data"""
+def detect_meta_galleries(content: Union[Article, Page]):
+    """Find galleries specified in the meta data or as inline gallery"""
+    if "gallery" in content.metadata:
+        gallery = content.metadata.get("gallery")
+        if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
+            content.photo_gallery = process_content_galleries(content, gallery)
+        elif gallery:
+            logger.error(f"photos: Gallery tag not recognized: {gallery}")
+
+
+def detect_meta_images(content: pelican.contents.Content):
+    """
+    Look for article or page photos specified in the meta data
+    Find images in the generated content and replace them with the processed images
+    """
     image = content.metadata.get("image", None)
     if image:
         if image.startswith("{photo}") or image.startswith("{filename}"):
             try:
-                content.photo_image = ArticleImage(
-                    content=content, filename=image, generator=generator
-                )
+                content.photo_image = ArticleImage(content=content, filename=image)
             except (FileNotFound, InternalError) as e:
                 logger.error(f"photo: {str(e)}")
         else:
@@ -1341,34 +1299,142 @@ def file_clipper(x: str) -> str:
     return x[11:] if x[10] == "/" else x[10:]
 
 
-def detect_content_images_and_galleries(generators: List[pelican.generators.Generator]):
-    """Runs generator on both pages and articles."""
+def replace_inline_galleries(content, inline_galleries):
+    for gallery_string, galleries in inline_galleries.items():
+        template = g_generator.get_template(
+            pelican_settings["PHOTO_INLINE_GALLERY_TEMPLATE"]
+        )
+        template_values = {
+            "galleries": galleries,
+        }
+        if isinstance(content, Article):
+            template_values["article"] = content
+        elif isinstance(content, Page):
+            template_values["page"] = content
+
+        content._content = content._content.replace(
+            gallery_string, template.render(**template_values)
+        )
+
+
+def replace_inline_images(content, inline_images):
+    for image_string, image_info in inline_images.items():
+        m = image_info["match"]
+        image = image_info["image"]
+
+        what = m.group("what")
+        value = m.group("value")
+        tag = m.group("tag")
+
+        if value.startswith("/"):
+            value = value[1:]
+
+        if what == "photo":
+            content._content = content._content.replace(
+                image_string,
+                "".join(
+                    (
+                        "<",
+                        m.group("tag"),
+                        m.group("attrs_before"),
+                        m.group("src"),
+                        "=",
+                        m.group("quote"),
+                        os.path.join(
+                            pelican_settings["SITEURL"], image.image.web_filename
+                        ),
+                        m.group("quote"),
+                        m.group("attrs_after"),
+                    )
+                ),
+            )
+
+        elif what == "lightbox" and tag == "img":
+            lightbox_attr_list = [""]
+
+            gallery_name = value.split("/")[0]
+            lightbox_attr_list.append(
+                '{}="{}"'.format(
+                    pelican_settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name
+                )
+            )
+
+            if image.caption:
+                lightbox_attr_list.append(
+                    '{}="{}"'.format(
+                        pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"],
+                        str(image.caption),
+                    )
+                )
+
+            lightbox_attrs = " ".join(lightbox_attr_list)
+
+            content._content = content._content.replace(
+                image_string,
+                "".join(
+                    (
+                        "<a href=",
+                        m.group("quote"),
+                        os.path.join(
+                            pelican_settings["SITEURL"], image.image.web_filename
+                        ),
+                        m.group("quote"),
+                        lightbox_attrs,
+                        "><img",
+                        m.group("attrs_before"),
+                        "src=",
+                        m.group("quote"),
+                        os.path.join(
+                            pelican_settings["SITEURL"], image.thumb.web_filename
+                        ),
+                        m.group("quote"),
+                        m.group("attrs_after"),
+                        "</a>",
+                    )
+                ),
+            )
+
+
+def handle_signal_generator_init(generator):
+    global g_generator
+    g_generator = generator
+
+
+def handle_signal_content_object_init(content: pelican.contents.Content):
+    if not isinstance(content, (Article, Page)):
+        return
+    inline_images = detect_inline_images(content)
+    inline_galleries = detect_inline_galleries(content)
+    process_image_queue()
+    replace_inline_images(content, inline_images)
+    replace_inline_galleries(content, inline_galleries)
+
+
+def handle_signal_all_generators_finalized(
+    generators: List[pelican.generators.Generator],
+):
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
             article: Article
             for article in itertools.chain(
                 generator.articles, generator.translations, generator.drafts
             ):
-                detect_content_image(generator, article)
-                detect_content_galleries(generator, article)
+                detect_meta_images(article)
+                detect_meta_galleries(article)
         elif isinstance(generator, PagesGenerator):
             page: Page
             for page in itertools.chain(
                 generator.pages, generator.translations, generator.hidden_pages
             ):
-                detect_content_image(generator, page)
-                detect_content_galleries(generator, page)
+                detect_meta_images(page)
+                detect_meta_galleries(page)
 
-
-def handle_signal_all_generators_finalized(
-    generators: List[pelican.generators.Generator],
-):
-    detect_content_images_and_galleries(generators)
-    resize_photos()
+    process_image_queue()
 
 
 def register():
     """Uses the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
-    signals.content_object_init.connect(detect_content)
+    signals.generator_init.connect(handle_signal_generator_init)
+    signals.content_object_init.connect(handle_signal_content_object_init)
     signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)

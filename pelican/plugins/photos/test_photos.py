@@ -40,6 +40,7 @@ class TestPhotos(unittest.TestCase):
         )
         photos.register()
         cls.generator.generate_context()
+        photos.handle_signal_generator_init(cls.generator)
         photos.handle_signal_all_generators_finalized([cls.generator])
 
     @classmethod
@@ -143,7 +144,7 @@ class TestPhotos(unittest.TestCase):
         self.assertEqual(expected, self.get_article("filename").content)
 
     def test_queue_resize(self):
-        assert len(photos.DEFAULT_CONFIG["queue_resize"]) == 5
+        assert len(photos.DEFAULT_CONFIG["image_cache"]) == 5
         expected = [
             "photos/agallery/best",
             "photos/agallery/besta",
@@ -151,7 +152,7 @@ class TestPhotos(unittest.TestCase):
             "photos/agallery/night",
             "photos/agallery/nightt",
         ]
-        assert sorted(expected) == sorted(photos.DEFAULT_CONFIG["queue_resize"].keys())
+        assert sorted(expected) == sorted(photos.DEFAULT_CONFIG["image_cache"].keys())
 
 
 if __name__ == "__main__":
