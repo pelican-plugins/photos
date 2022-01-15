@@ -39,8 +39,8 @@ class TestPhotos(unittest.TestCase):
             output_path=cls.settings["OUTPUT_PATH"],
         )
         photos.register()
-        cls.generator.generate_context()
         photos.handle_signal_generator_init(cls.generator)
+        cls.generator.generate_context()
         photos.handle_signal_all_generators_finalized([cls.generator])
 
     @classmethod
