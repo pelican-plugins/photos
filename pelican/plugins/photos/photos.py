@@ -1,4 +1,5 @@
 import base64
+from collections import namedtuple
 import datetime
 from html.parser import HTMLParser
 import itertools
@@ -46,6 +47,11 @@ else:
     logger.debug("piexif found.")
 
 
+InlineContentData = namedtuple(
+    "InlineContentData", ["type", "image", "html_attributes"]
+)
+
+
 class InternalError(Exception):
     pass
 
@@ -62,12 +68,22 @@ class ImageExcluded(Exception):
     pass
 
 
-class ImageSpecNotFound(Exception):
+class ImageConfigNotFound(Exception):
     pass
 
 
 class ProfileNotFound(Exception):
     pass
+
+
+class HTMLTagParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tag_attrs = {}
+
+    def handle_starttag(self, tag, attrs):
+        logger.debug(f"Found tag: {tag}")
+        self.tag_attrs.update(dict(attrs))
 
 
 class HTMLImgParser(HTMLParser):
@@ -92,49 +108,68 @@ class Profile:
         self._config = config
         self._default_profile = default_profile
 
-    def get_spec(self, name) -> Dict[str, Any]:
+    def get_image_config(self, name) -> Dict[str, Any]:
         images = self._config.get("images")
-        spec = None
+        config = None
         if images is not None:
-            spec = images.get(name)
-        if spec is None and self._default_profile is not None:
-            spec = self._default_profile.get_spec(name)
-        if spec is None:
-            raise ImageSpecNotFound(
-                f"Unable to find image specs for '{name}' in profile '{self.name}'"
+            config = images.get(name)
+        if config is None and self._default_profile is not None:
+            config = self._default_profile.get_image_config(name)
+        if config is None:
+            raise ImageConfigNotFound(
+                f"Unable to find image config for '{name}' in profile '{self.name}'"
             )
-        return spec
+        return config
+
+    def render_template(self, default_template_name=None, **kwargs):
+        tpl_name = self._config.get("template_name")
+        if tpl_name is None:
+            tpl_name = default_template_name
+        if tpl_name is None:
+            logger.error("Unable to find template for profile")
+        return g_generator.get_template(tpl_name).render(**kwargs)
+
+    @property
+    def has_template(self) -> bool:
+        if "template_name" in self._config:
+            return True
+        return False
 
     @property
     def article_file_suffix(self) -> str:
-        spec = self.article_image_spec
-        return spec.get("file_suffix", "a")
+        return self.get_image_config("article").get("file_suffix", "a")
+
+    @property
+    def article_html_img_attributes(self) -> Dict[str, str]:
+        return self.get_image_config("article").get("html_img_attributes", {})
 
     @property
     def article_image_spec(self) -> Dict[str, Any]:
-        return self.get_spec("article")
+        return self.get_image_config("article")["specs"]
 
     @property
     def gallery_file_suffix(self) -> str:
-        spec = self.gallery_image_spec
-        return spec.get("file_suffix", "")
+        return self.get_image_config("gallery").get("file_suffix", "")
+
+    @property
+    def gallery_html_img_attributes(self) -> Dict[str, str]:
+        return self.get_image_config("gallery").get("html_img_attributes", {})
 
     @property
     def gallery_image_spec(self) -> Dict[str, Any]:
-        return self.get_spec("gallery")
-
-    @property
-    def html_img_attributes(self) -> Dict[str, str]:
-        return self._config.get("html_img_attributes", {})
+        return self.get_image_config("gallery")["specs"]
 
     @property
     def thumb_file_suffix(self) -> str:
-        spec = self.thumb_image_spec
-        return spec.get("file_suffix", "t")
+        return self.get_image_config("thumb").get("file_suffix", "t")
+
+    @property
+    def thumb_html_img_attributes(self) -> Dict[str, str]:
+        return self.get_image_config("thumb").get("html_img_attributes", {})
 
     @property
     def thumb_image_spec(self) -> Dict[str, Any]:
-        return self.get_spec("thumb")
+        return self.get_image_config("thumb")["specs"]
 
 
 def find_profile(names: List[str], default_not_found=True):
@@ -417,6 +452,13 @@ class Gallery:
     ):
         self.content = content
 
+        if profile is None:
+            if profile_name is None:
+                profile_name = "default"
+            self.profile = get_profile(profile_name)
+        else:
+            self.profile = profile
+
         if location_parsed["type"] == "{photo}":
             dir_gallery = os.path.join(
                 os.path.expanduser(pelican_settings["PHOTO_LIBRARY"]),
@@ -458,8 +500,7 @@ class Gallery:
                     GalleryImage(
                         filename=pic,
                         gallery=self,
-                        profile_name=profile_name,
-                        profile=profile,
+                        profile=self.profile,
                     )
                 )
             except ImageExcluded:
@@ -1184,11 +1225,29 @@ def initialized(pelican: Pelican):
         pelican.settings.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
         pelican.settings.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
+        pelican.settings.setdefault("PHOTO_INLINE_ENABLED", False)
+        pelican.settings.setdefault(
+            "PHOTO_INLINE_PATTERN",
+            (
+                r"(?is)"
+                r"<(?P<tag>[^\s>]+)"
+                r"(\s+[^>]+)?\s+"
+                r"(?P<type>(gallery|image|lightbox))\s*=\s*"
+                r"(?P<quote>[\"'])"
+                r"(?P<name>.*?)"
+                r"(?P=quote)"
+                r"([^>]+)?"
+                r"(/>|>.*?</(?P=tag)>)"
+            ),
+        )
+        pelican.settings.setdefault("PHOTO_INLINE_PARSE_HTML", True)
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_ENABLED", False)
         pelican.settings.setdefault(
             "PHOTO_INLINE_GALLERY_PATTERN", r"gallery::(?P<gallery_name>[/{}\w_-]+)"
         )
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_TEMPLATE", "inline_gallery")
+        pelican.settings.setdefault("PHOTO_INLINE_IMAGE_TEMPLATE", "inline_image")
+        pelican.settings.setdefault("PHOTO_INLINE_LIGHTBOX_TEMPLATE", "inline_lightbox")
         pelican.settings.setdefault(
             "PHOTO_DEFAULT_IMAGE_OPTIONS", {"jpeg": {"optimize": True}}
         )
@@ -1217,17 +1276,23 @@ def initialized(pelican: Pelican):
         name="default",
         config={
             "images": {
-                "article": pelican_settings["PHOTO_ARTICLE"],
-                "gallery": pelican_settings["PHOTO_GALLERY"],
-                "thumb": pelican_settings["PHOTO_THUMB"],
+                "article": {"specs": pelican_settings["PHOTO_ARTICLE"]},
+                "gallery": {"specs": pelican_settings["PHOTO_GALLERY"]},
+                "thumb": {"specs": pelican_settings["PHOTO_THUMB"]},
             }
         },
     )
     g_profiles["default"] = default_profile
     for profile_name, profile_config in pelican_settings["PHOTO_PROFILES"].items():
-        g_profiles[profile_name] = Profile(
-            name=profile_name, config=profile_config, default_profile=default_profile
-        )
+        if isinstance(profile_config, dict):
+            g_profiles[profile_name] = Profile(
+                name=profile_name,
+                config=profile_config,
+                default_profile=default_profile,
+            )
+    for profile_name, profile_config in pelican_settings["PHOTO_PROFILES"].items():
+        if isinstance(profile_config, str):
+            g_profiles[profile_name] = g_profiles[profile_config]
 
 
 def enqueue_image(img: Image) -> Image:
@@ -1442,12 +1507,17 @@ def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
         )
 
 
-def process_content_galleries(content: Union[Article, Page], location) -> List[Gallery]:
+def process_content_galleries(
+    content: Union[Article, Page],
+    location,
+    profile_name: Optional[str] = None,
+) -> List[Gallery]:
     """
     Process all galleries attached to an article or page.
 
     :param content: The content object
     :param location: Galleries
+    :param profile_name:
     """
     photo_galleries = []
 
@@ -1455,7 +1525,7 @@ def process_content_galleries(content: Union[Article, Page], location) -> List[G
 
     for gallery in galleries:
         try:
-            gallery = Gallery(content, gallery)
+            gallery = Gallery(content, gallery, profile_name=profile_name)
         except GalleryNotFound as e:
             logger.error(f"photos: {str(e)}")
 
@@ -1464,14 +1534,7 @@ def process_content_galleries(content: Union[Article, Page], location) -> List[G
 
 
 def detect_inline_galleries(content: Union[Article, Page]):
-    """Find galleries specified in the meta data or as inline gallery"""
-    if "gallery" in content.metadata:
-        gallery = content.metadata.get("gallery")
-        if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
-            content.photo_gallery = process_content_galleries(content, gallery)
-        elif gallery:
-            logger.error(f"photos: Gallery tag not recognized: {gallery}")
-
+    """Find galleries specified as inline gallery"""
     inline_galleries = {}
     if pelican_settings["PHOTO_INLINE_GALLERY_ENABLED"]:
         gallery_strings = re.finditer(
@@ -1483,6 +1546,58 @@ def detect_inline_galleries(content: Union[Article, Page]):
             )
 
     return inline_galleries
+
+
+def detect_inline_contents(content: Union[Article, Page]):
+    """Find inline galleries, images, ..."""
+    if not pelican_settings["PHOTO_INLINE_ENABLED"]:
+        return {}
+
+    inline_contents = {}
+    content_strings = re.finditer(
+        pelican_settings["PHOTO_INLINE_PATTERN"], content._content
+    )
+    for m in content_strings:
+        profile_name = None
+        html_attributes = {}
+        if pelican_settings["PHOTO_INLINE_PARSE_HTML"]:
+            parser = HTMLTagParser()
+            parser.feed(m.group())
+            html_attributes = parser.tag_attrs
+            profile_name = html_attributes.get("profile")
+
+        if m.group("type") == "gallery":
+            inline_contents[str(m.group())] = InlineContentData(
+                m.group("type"),
+                process_content_galleries(
+                    content=content,
+                    location=m.group("name"),
+                    profile_name=profile_name,
+                ),
+                html_attributes,
+            )
+
+        elif m.group("type") == "image":
+            inline_contents[str(m.group())] = InlineContentData(
+                m.group("type"),
+                ContentImage(
+                    filename=m.group("name"),
+                    profile_name=profile_name,
+                ),
+                html_attributes,
+            )
+        elif m.group("type") == "lightbox":
+            inline_contents[str(m.group())] = InlineContentData(
+                m.group("type"),
+                ContentImageLightbox(
+                    filename=m.group("name"),
+                    profile_name=profile_name,
+                ),
+                html_attributes,
+            )
+        else:
+            logger.error(f"Unsupported type '{m.group('type')}' in '{m.group()}")
+    return inline_contents
 
 
 def detect_meta_galleries(content: Union[Article, Page]):
@@ -1511,6 +1626,47 @@ def detect_meta_images(content: pelican.contents.Content):
             logger.error(f"photos: Image tag not recognized: {image}")
 
 
+def replace_inline_contents(content, inline_contents):
+    for content_string, content_info in inline_contents.items():
+        image = content_info.image
+        template_values = {
+            "content": content,
+            "html_attributes": content_info.html_attributes,
+        }
+        profile = None
+        if content_info.type == "gallery":
+            template_values["default_template_name"] = pelican_settings[
+                "PHOTO_INLINE_GALLERY_TEMPLATE"
+            ]
+            template_values["galleries"] = image
+            # We use the profile from the first gallery
+            profile = image[0].profile
+        elif content_info.type == "image":
+            template_values["default_template_name"] = pelican_settings[
+                "PHOTO_INLINE_IMAGE_TEMPLATE"
+            ]
+            template_values["image"] = image
+            profile = image.profile
+        elif content_info.type == "lightbox":
+            template_values["default_template_name"] = pelican_settings[
+                "PHOTO_INLINE_LIGHTBOX_TEMPLATE"
+            ]
+            template_values["lightbox_image"] = image
+            profile = image.profile
+        else:
+            logger.error(f"Unable to handle type '{content_info.type}")
+            continue
+
+        if isinstance(content, Article):
+            template_values["article"] = content
+        elif isinstance(content, Page):
+            template_values["page"] = content
+
+        content._content = content._content.replace(
+            content_string, profile.render_template(**template_values)
+        )
+
+
 def replace_inline_galleries(content, inline_galleries):
     for gallery_string, galleries in inline_galleries.items():
         template = g_generator.get_template(
@@ -1533,7 +1689,7 @@ def replace_inline_images(content, inline_images):
     for image_string, image_info in inline_images.items():
         m = image_info["match"]
         image = image_info["image"]
-        # parsed_attrs = image_info.get("parsed_attrs")
+        parsed_attrs = image_info.get("parsed_attrs")
         profile = image.profile
 
         what = m.group("what")
@@ -1544,13 +1700,25 @@ def replace_inline_images(content, inline_images):
             value = value[1:]
 
         extra_attributes = ""
-        if profile.html_img_attributes:
-            for prof_attr_name, prof_attr_value in profile.html_img_attributes.items():
+        html_img_attributes = profile.thumb_html_img_attributes
+        if html_img_attributes:
+            for prof_attr_name, prof_attr_value in html_img_attributes.items():
                 extra_attributes += ' {}="{}"'.format(
                     prof_attr_name, prof_attr_value.format(i=image)
                 )
 
-        if what == "photo":
+        if profile.has_template:
+            content._content = content._content.replace(
+                image_string,
+                profile.render_template(
+                    content=content,
+                    image=image,
+                    match=m,
+                    parsed_attrs=dict(parsed_attrs),
+                ),
+            )
+
+        elif what == "photo":
             content._content = content._content.replace(
                 image_string,
                 "".join(
@@ -1628,9 +1796,11 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
         return
     inline_images = detect_inline_images(content)
     inline_galleries = detect_inline_galleries(content)
+    inline_contents = detect_inline_contents(content)
     process_image_queue()
     replace_inline_images(content, inline_images)
     replace_inline_galleries(content, inline_galleries)
+    replace_inline_contents(content, inline_contents)
 
 
 def handle_signal_all_generators_finalized(
