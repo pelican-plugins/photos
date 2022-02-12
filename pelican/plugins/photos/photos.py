@@ -809,7 +809,7 @@ class Image:
 
     def _load_result_info(self, image: Optional[PILImage.Image] = None):
         """Load the information from the result image"""
-        if self._result_info_loaded:
+        if not self._result_info_loaded:
             if image is None:
                 image: PILImage.Image = PILImage.open(self.output_filename)
 
