@@ -1,4 +1,5 @@
 import os
+import re
 from shutil import rmtree
 from tempfile import mkdtemp
 
@@ -39,6 +40,7 @@ class TestPhotos(unittest.TestCase):
             output_path=cls.settings["OUTPUT_PATH"],
         )
         photos.register()
+        photos.handle_signal_generator_init(cls.generator)
         cls.generator.generate_context()
         photos.handle_signal_all_generators_finalized([cls.generator])
 
@@ -143,7 +145,7 @@ class TestPhotos(unittest.TestCase):
         self.assertEqual(expected, self.get_article("filename").content)
 
     def test_queue_resize(self):
-        assert len(photos.DEFAULT_CONFIG["queue_resize"]) == 5
+        assert len(photos.DEFAULT_CONFIG["image_cache"]) == 5
         expected = [
             "photos/agallery/best",
             "photos/agallery/besta",
@@ -151,7 +153,79 @@ class TestPhotos(unittest.TestCase):
             "photos/agallery/night",
             "photos/agallery/nightt",
         ]
-        assert sorted(expected) == sorted(photos.DEFAULT_CONFIG["queue_resize"].keys())
+        assert sorted(expected) == sorted(photos.DEFAULT_CONFIG["image_cache"].keys())
+
+    def test_inline_regex_simple(self):
+        regex = re.compile(self.settings["PHOTO_INLINE_PATTERN"])
+        m = regex.match("""<div gallery="foo"></div>""")
+        assert m
+        assert m.group("name") == "foo"
+        assert m.group("type") == "gallery"
+
+        parser = photos.HTMLTagParser()
+        parser.feed(m.group())
+        assert len(parser.tag_attrs) == 1
+        assert parser.tag_attrs["gallery"] == "foo"
+
+    def test_inline_regex_multi_element(self):
+        regex = re.compile(self.settings["PHOTO_INLINE_PATTERN"])
+        m = regex.match("""<div gallery="foo"><span test="more"></span></div>""")
+        assert m
+        assert m.group("name") == "foo"
+        assert m.group("type") == "gallery"
+
+        parser = photos.HTMLTagParser()
+        parser.feed(m.group())
+        assert len(parser.tag_attrs) == 2
+        assert parser.tag_attrs["gallery"] == "foo"
+        assert parser.tag_attrs["test"] == "more"
+
+    def test_inline_regex_case(self):
+        regex = re.compile(self.settings["PHOTO_INLINE_PATTERN"])
+        m = regex.match("""<dIv foo="bar" gallery = "foo" bar = "foo"></DiV>""")
+        assert m
+        assert m.group("name") == "foo"
+        assert m.group("type") == "gallery"
+
+        parser = photos.HTMLTagParser()
+        parser.feed(m.group())
+        assert len(parser.tag_attrs) == 3
+        assert parser.tag_attrs["gallery"] == "foo"
+        assert parser.tag_attrs["foo"] == "bar"
+        assert parser.tag_attrs["bar"] == "foo"
+
+    def test_inline_regex_multi_line(self):
+        regex = re.compile(self.settings["PHOTO_INLINE_PATTERN"])
+        m = regex.match(
+            """<dIv
+        foo="bar"
+        gallery = "foo"
+        bar = "foo">
+        </DiV>
+        """
+        )
+        assert m
+        assert m.group("name") == "foo"
+        assert m.group("type") == "gallery"
+
+        parser = photos.HTMLTagParser()
+        parser.feed(m.group())
+        assert len(parser.tag_attrs) == 3
+        assert parser.tag_attrs["gallery"] == "foo"
+        assert parser.tag_attrs["foo"] == "bar"
+        assert parser.tag_attrs["bar"] == "foo"
+
+    def test_inline_regex_short(self):
+        regex = re.compile(self.settings["PHOTO_INLINE_PATTERN"])
+        m = regex.match("""<div image="foo"/>""")
+        assert m
+        assert m.group("name") == "foo"
+        assert m.group("type") == "image"
+
+        parser = photos.HTMLTagParser()
+        parser.feed(m.group())
+        assert len(parser.tag_attrs) == 1
+        assert parser.tag_attrs["image"] == "foo"
 
 
 if __name__ == "__main__":

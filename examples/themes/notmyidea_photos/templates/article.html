@@ -26,15 +26,15 @@
       {% include 'twitter.html' %}
     </header>
     <div class="entry-content">
-      <!-- PHOTO plugin: article image -->
+      <!-- >>>> Start >>>>> PHOTO plugin: article image >>>>>>>>> -->
       {% if article.photo_image %}
         <img src="{{ SITEURL }}/{{ article.photo_image[1] }}" />
       {% endif %}
-      <!-- PHOTO plugin: article image -->
+      <!-- <<<< End <<<<< PHOTO plugin: article image <<<<<<<<< -->
       {% include 'article_infos.html' %}
       {{ article.content }}
       {% if article.photo_gallery %}
-      <!-- PHOTO plugin: article gallery -->
+      <!-- >>>> Start >>>>> PHOTO plugin: article gallery >>>>>>>>> -->
       {% if article.photo_gallery %}
       <div class="gallery">
           {% for title, gallery in article.photo_gallery %}
@@ -45,7 +45,7 @@
           {% endfor %}
       </div>
       {% endif %}
-      <!-- PHOTO plugin: article gallery -->
+      <!-- <<<< End <<<<< PHOTO plugin: article gallery <<<<<<<<< -->
       {% endif %}
     </div><!-- /.entry-content -->
     {% if DISQUS_SITENAME and SITEURL and article.status != "draft" %}
