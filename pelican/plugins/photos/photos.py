@@ -725,44 +725,65 @@ class Image:
             ),
         )
 
-        self.pre_operations = []
-        if self.is_thumb and pelican_settings["PHOTO_SQUARE_THUMB"]:
-            self.pre_operations += [
-                (
-                    "ops.fit",
-                    {
-                        "size": (spec["width"], spec["height"]),
-                        "method": PILImage.ANTIALIAS,
-                    },
-                ),
-            ]
-        else:
-            self.pre_operations += [
-                (
-                    "main.resize",
-                    {
-                        "size": (spec["width"], spec["height"]),
-                        "resample": PILImage.ANTIALIAS,
-                    },
-                )
-            ]
+        self.pre_operations: List[Union[str, List, Tuple]] = []
+        self.operations: List[Union[str, List, Tuple]] = []
+        self.post_operations: List[Union[str, List, Tuple]] = []
 
-        self.pre_operations += [
-            "main.remove_alpha",
-        ]
+        if self.type in ("jpeg",):
+            self.pre_operations.append("main.remove_alpha")
 
-        self.post_operations = [
-            "main.watermark",
-        ]
+        self.post_operations.append("main.watermark")
+
+        if self.type == "gif":
+            self.post_operations += ("main.convert_mode_p",)
+
+        skip_operations = self.spec.get("skip_operations")
+        if isinstance(skip_operations, (list, tuple)):
+            for item in self.pre_operations:
+                if (isinstance(item, str) and item in skip_operations) or (
+                    isinstance(item, (list, tuple)) and item[0] in skip_operations
+                ):
+                    self.pre_operations.remove(item)
+            for item in self.post_operations:
+                if (isinstance(item, str) and item in skip_operations) or (
+                    isinstance(item, (list, tuple)) and item[0] in skip_operations
+                ):
+                    self.post_operations.remove(item)
 
         operations = self.spec.get("operations")
         if operations is None:
-            self.operations = []
+            if self.is_thumb and pelican_settings["PHOTO_SQUARE_THUMB"]:
+                self.operations.append("ops.fit")
+            else:
+                self.operations.append("main.resize")
         elif isinstance(operations, (list, tuple)):
             self.operations = operations
         else:
             logger.warning("Wrong data-type for operations, should be list or tuple")
             self.operations = []
+
+        operations = []
+        for operation in self.operations:
+            if isinstance(operation, str):
+                operation_name = operation
+                operation_args = {}
+            else:
+                operation_name = operation[0]
+                operation_args = operation[1]
+
+            if operation_name == "main.resize" and not operation_args:
+                operation_args["resample"] = PILImage.ANTIALIAS
+            if operation_name == "ops.fit" and not operation_args:
+                operation_args["method"] = PILImage.ANTIALIAS
+            if (
+                operation_name in ("main.resize", "ops.fit")
+                and "size" not in operation_args
+            ):
+                operation_args["size"] = (spec["width"], spec["height"])
+
+            operations.append((operation_name, operation_args))
+
+        self.operations = operations
 
         self.operation_mappings = {
             "main.remove_alpha": self._operation_remove_alpha,
