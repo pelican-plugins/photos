@@ -735,7 +735,7 @@ class Image:
         self.post_operations.append("main.watermark")
 
         if self.type == "gif":
-            self.post_operations += ("main.convert_mode_p",)
+            self.post_operations.append("main.convert_mode_p")
 
         skip_operations = self.spec.get("skip_operations")
         if isinstance(skip_operations, (list, tuple)):
@@ -786,6 +786,7 @@ class Image:
         self.operations = operations
 
         self.operation_mappings = {
+            "main.convert_mode_p": self._operation_convert_mode_p,
             "main.remove_alpha": self._operation_remove_alpha,
             "main.resize": self._operation_resize,
             "main.watermark": self._operation_watermark,
@@ -997,6 +998,12 @@ class Image:
         alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
         im.putalpha(alpha)
         return im
+
+    @staticmethod
+    def _operation_convert_mode_p(img: PILImage.Image):
+        if img.mode == "P":
+            return img
+        return img.convert("P")
 
     def _operation_remove_alpha(self, image: PILImage.Image) -> PILImage.Image:
         """Remove the alpha channel"""
