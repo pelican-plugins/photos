@@ -699,11 +699,22 @@ class Image:
         additional_images: Dict[str, Any] = spec.get("images")
         if additional_images is None:
             additional_images = {}
+
         for add_img_name, add_img_spec in additional_images.items():
+            if not isinstance(add_img_spec, dict):
+                add_img_spec = {}
+
+            add_img_spec_combined = {}
+            # We use some values from the parent as default
+            for name in ("operations", "skip_operations", "type"):
+                if name in self.spec:
+                    add_img_spec_combined[name] = self.spec[name]
+            add_img_spec_combined.update(add_img_spec)
+
             img = Image(
                 src=self.source_image.filename,
                 dst=f"{self.dst}_{add_img_name}",
-                spec=add_img_spec,
+                spec=add_img_spec_combined,
                 is_thumb=self.is_thumb,
             )
             img = enqueue_image(img)
