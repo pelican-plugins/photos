@@ -786,9 +786,11 @@ class Image:
         self.operations = operations
 
         self.operation_mappings = {
+            "main.convert": self._operation_convert,
             "main.convert_mode_p": self._operation_convert_mode_p,
             "main.remove_alpha": self._operation_remove_alpha,
             "main.resize": self._operation_resize,
+            "main.quantize": self._operation_quantize,
             "main.watermark": self._operation_watermark,
             "ops.greyscale": ImageOps.grayscale,
             "ops.fit": ImageOps.fit,
@@ -1000,6 +1002,10 @@ class Image:
         return im
 
     @staticmethod
+    def _operation_convert(image: PILImage.Image, *args, **kwargs):
+        return image.convert(*args, **kwargs)
+
+    @staticmethod
     def _operation_convert_mode_p(img: PILImage.Image):
         if img.mode == "P":
             return img
@@ -1019,6 +1025,10 @@ class Image:
     def _operation_resize(image, *args, **kwargs):
         image.thumbnail(*args, **kwargs)
         return image
+
+    @staticmethod
+    def _operation_quantize(image: PILImage.Image, *args, **kwargs):
+        return image.quantize(*args, **kwargs)
 
     @staticmethod
     def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
