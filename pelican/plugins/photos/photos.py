@@ -601,6 +601,30 @@ class GalleryImage(BaseImage):
         return self.image.is_excluded
 
 
+class GlobalImage(BaseImage):
+    def __init__(
+        self,
+        filename,
+        profile_name: Optional[str] = None,
+        profile: Optional[Profile] = None,
+    ):
+        super().__init__(filename, profile_name=profile_name, profile=profile)
+
+        if not os.path.isfile(self.src_filename):
+            raise FileNotFound(f"No photo for {self.src_filename} {self.filename}")
+
+        img = Image(
+            src=self.src_filename,
+            dst=os.path.join(
+                "photos",
+                os.path.splitext(self.filename)[0].lower()
+                + self.profile.article_file_suffix,
+            ),
+            specs=self.profile.article_image_spec,
+        )
+        self.image = enqueue_image(img)
+
+
 class Image:
     """
     The main Image class to hold all information of the generated image and to process
@@ -1215,6 +1239,7 @@ def initialized(pelican: Pelican):
         pelican.settings.setdefault("PHOTO_EXIF_REMOVE_GPS", False)
         pelican.settings.setdefault("PHOTO_EXIF_AUTOROTATE", True)
         pelican.settings.setdefault("PHOTO_EXIF_COPYRIGHT", False)
+        pelican.settings.setdefault("PHOTO_GLOBAL_IMAGES", {})
         pelican.settings.setdefault("PHOTO_PROFILES", {})
         pelican.settings.setdefault(
             "PHOTO_EXIF_COPYRIGHT_AUTHOR", pelican.settings["AUTHOR"]
@@ -1806,6 +1831,16 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
 def handle_signal_all_generators_finalized(
     generators: List[pelican.generators.Generator],
 ):
+    global_images = {}
+    for name, config in pelican_settings["PHOTO_GLOBAL_IMAGES"].items():
+        try:
+            global_images[name] = GlobalImage(
+                filename=config["filename"],
+                profile_name=config.get("profile"),
+            )
+        except (FileNotFound, InternalError) as e:
+            logger.error(f"photo: {str(e)}")
+
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
             article: Article
@@ -1814,6 +1849,7 @@ def handle_signal_all_generators_finalized(
             ):
                 detect_meta_images(article)
                 detect_meta_galleries(article)
+                article.photo_global_images = global_images
         elif isinstance(generator, PagesGenerator):
             page: Page
             for page in itertools.chain(
@@ -1821,6 +1857,7 @@ def handle_signal_all_generators_finalized(
             ):
                 detect_meta_images(page)
                 detect_meta_galleries(page)
+                page.photo_global_images = global_images
 
     process_image_queue()
 
