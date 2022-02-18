@@ -130,6 +130,10 @@ class Profile:
         return g_generator.get_template(tpl_name).render(**kwargs)
 
     @property
+    def file_suffix(self) -> str:
+        return self._config.get("file_suffix", "")
+
+    @property
     def has_template(self) -> bool:
         if "template_name" in self._config:
             return True
@@ -371,9 +375,12 @@ class ArticleImage(BaseImage):
         photo = (
             os.path.splitext(self.filename)[0].lower()
             + self.profile.article_file_suffix
+            + self.profile.file_suffix
         )
         thumb = (
-            os.path.splitext(self.filename)[0].lower() + self.profile.thumb_file_suffix
+            os.path.splitext(self.filename)[0].lower()
+            + self.profile.thumb_file_suffix
+            + self.profile.file_suffix
         )
         img = Image(
             src=self.src_filename,
@@ -420,7 +427,8 @@ class ContentImage(BaseImage):
             dst=os.path.join(
                 "photos",
                 os.path.splitext(self.filename)[0].lower()
-                + self.profile.article_file_suffix,
+                + self.profile.article_file_suffix
+                + self.profile.file_suffix,
             ),
             specs=self.profile.article_image_spec,
         )
@@ -444,7 +452,8 @@ class ContentImageLightbox(BaseImage):
             dst=os.path.join(
                 "photos",
                 os.path.splitext(filename)[0].lower()
-                + self.profile.gallery_file_suffix,
+                + self.profile.gallery_file_suffix
+                + self.profile.file_suffix,
             ),
             specs=self.profile.gallery_image_spec,
         )
@@ -454,7 +463,9 @@ class ContentImageLightbox(BaseImage):
             src=self.src_filename,
             dst=os.path.join(
                 "photos",
-                os.path.splitext(filename)[0].lower() + self.profile.thumb_file_suffix,
+                os.path.splitext(filename)[0].lower()
+                + self.profile.thumb_file_suffix
+                + self.profile.file_suffix,
             ),
             specs=self.profile.thumb_image_spec,
             is_thumb=True,
@@ -576,7 +587,8 @@ class GalleryImage(BaseImage):
             dst=os.path.join(
                 "photos",
                 os.path.splitext(self.filename)[0].lower()
-                + self.profile.gallery_file_suffix,
+                + self.profile.gallery_file_suffix
+                + self.profile.file_suffix,
             ),
             specs=self.profile.gallery_image_spec,
         )
@@ -591,7 +603,8 @@ class GalleryImage(BaseImage):
             dst=os.path.join(
                 "photos",
                 os.path.splitext(self.filename)[0].lower()
-                + self.profile.thumb_file_suffix,
+                + self.profile.thumb_file_suffix
+                + self.profile.file_suffix,
             ),
             specs=self.profile.thumb_image_spec,
             is_thumb=True,
@@ -651,7 +664,8 @@ class GlobalImage(BaseImage):
             dst=os.path.join(
                 "photos",
                 os.path.splitext(self.filename)[0].lower()
-                + self.profile.article_file_suffix,
+                + self.profile.article_file_suffix
+                + self.profile.file_suffix,
             ),
             specs=self.profile.article_image_spec,
         )
