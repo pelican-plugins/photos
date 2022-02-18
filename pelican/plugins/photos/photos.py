@@ -11,7 +11,7 @@ import os
 import pprint
 import queue
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 from pelican import Pelican, signals
@@ -191,6 +191,39 @@ def get_profile(name: str) -> Profile:
     if profile is None:
         raise ProfileNotFound(f"Unable to find profile '{name}'")
     return profile
+
+
+def get_image_from_string(
+    url_string: str,
+    image_class: Optional[Type["BaseImage"]] = None,
+    default_image_class: Optional[Type["BaseImage"]] = None,
+) -> "BaseImage":
+    value_mapping = {
+        "profile": "profile_name",
+    }
+    url = urllib.parse.urlparse(url_string)
+    query_params = dict(urllib.parse.parse_qsl(url.query))
+    kwargs = {}
+    for query_name, arg_name in value_mapping.items():
+        if query_name in query_params:
+            print(query_params.get(query_name))
+            kwargs[arg_name] = query_params.get(query_name)
+
+    if image_class is None and "type" in query_params:
+        image_type = query_params["type"].lower().strip()
+        if image_type == "content":
+            image_class = ContentImage
+        else:
+            logger.warning(
+                f"Unable to find image class for type='{image_type}'"
+                f" on '{url_string}' - Supported types are: content"
+            )
+
+    if image_class is None and default_image_class is not None:
+        logger.debug(f"Using default image class for '{url_string}'")
+        image_class = default_image_class
+
+    return image_class(filename=url.path, **kwargs)
 
 
 class BaseNoteCache:
@@ -1698,6 +1731,17 @@ def detect_meta_images(content: pelican.contents.Content):
                 logger.error(f"photo: {str(e)}")
         else:
             logger.error(f"photos: Image tag not recognized: {image}")
+
+    images = {}
+    for meta_name, meta_value in content.metadata.items():
+        meta_prefix, _, meta_image_name = meta_name.partition("_")
+        if meta_image_name and meta_prefix.lower().strip() == "image":
+            images[meta_image_name.strip()] = get_image_from_string(
+                url_string=meta_value, default_image_class=ContentImage
+            )
+
+    if len(images) > 0:
+        content.photo_images = images
 
 
 def replace_inline_contents(content, inline_contents):
