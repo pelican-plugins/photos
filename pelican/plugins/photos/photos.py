@@ -699,11 +699,22 @@ class Image:
         additional_images: Dict[str, Any] = spec.get("images")
         if additional_images is None:
             additional_images = {}
+
         for add_img_name, add_img_spec in additional_images.items():
+            if not isinstance(add_img_spec, dict):
+                add_img_spec = {}
+
+            add_img_spec_combined = {}
+            # We use some values from the parent as default
+            for name in ("operations", "skip_operations", "type"):
+                if name in self.spec:
+                    add_img_spec_combined[name] = self.spec[name]
+            add_img_spec_combined.update(add_img_spec)
+
             img = Image(
                 src=self.source_image.filename,
                 dst=f"{self.dst}_{add_img_name}",
-                spec=add_img_spec,
+                spec=add_img_spec_combined,
                 is_thumb=self.is_thumb,
             )
             img = enqueue_image(img)
@@ -725,48 +736,72 @@ class Image:
             ),
         )
 
-        self.pre_operations = []
-        if self.is_thumb and pelican_settings["PHOTO_SQUARE_THUMB"]:
-            self.pre_operations += [
-                (
-                    "ops.fit",
-                    {
-                        "size": (spec["width"], spec["height"]),
-                        "method": PILImage.ANTIALIAS,
-                    },
-                ),
-            ]
-        else:
-            self.pre_operations += [
-                (
-                    "main.resize",
-                    {
-                        "size": (spec["width"], spec["height"]),
-                        "resample": PILImage.ANTIALIAS,
-                    },
-                )
-            ]
+        self.pre_operations: List[Union[str, List, Tuple]] = []
+        self.operations: List[Union[str, List, Tuple]] = []
+        self.post_operations: List[Union[str, List, Tuple]] = []
 
-        self.pre_operations += [
-            "main.remove_alpha",
-        ]
+        if self.type in ("jpeg",):
+            self.pre_operations.append("main.remove_alpha")
 
-        self.post_operations = [
-            "main.watermark",
-        ]
+        self.post_operations.append("main.watermark")
+
+        if self.type == "gif":
+            self.post_operations.append("main.convert_mode_p")
+
+        skip_operations = self.spec.get("skip_operations")
+        if isinstance(skip_operations, (list, tuple)):
+            for item in self.pre_operations:
+                if (isinstance(item, str) and item in skip_operations) or (
+                    isinstance(item, (list, tuple)) and item[0] in skip_operations
+                ):
+                    self.pre_operations.remove(item)
+            for item in self.post_operations:
+                if (isinstance(item, str) and item in skip_operations) or (
+                    isinstance(item, (list, tuple)) and item[0] in skip_operations
+                ):
+                    self.post_operations.remove(item)
 
         operations = self.spec.get("operations")
         if operations is None:
-            self.operations = []
+            if self.is_thumb and pelican_settings["PHOTO_SQUARE_THUMB"]:
+                self.operations.append("ops.fit")
+            else:
+                self.operations.append("main.resize")
         elif isinstance(operations, (list, tuple)):
             self.operations = operations
         else:
             logger.warning("Wrong data-type for operations, should be list or tuple")
             self.operations = []
 
+        operations = []
+        for operation in self.operations:
+            if isinstance(operation, str):
+                operation_name = operation
+                operation_args = {}
+            else:
+                operation_name = operation[0]
+                operation_args = operation[1]
+
+            if operation_name == "main.resize" and not operation_args:
+                operation_args["resample"] = PILImage.ANTIALIAS
+            if operation_name == "ops.fit" and not operation_args:
+                operation_args["method"] = PILImage.ANTIALIAS
+            if (
+                operation_name in ("main.resize", "ops.fit")
+                and "size" not in operation_args
+            ):
+                operation_args["size"] = (spec["width"], spec["height"])
+
+            operations.append((operation_name, operation_args))
+
+        self.operations = operations
+
         self.operation_mappings = {
+            "main.convert": self._operation_convert,
+            "main.convert_mode_p": self._operation_convert_mode_p,
             "main.remove_alpha": self._operation_remove_alpha,
             "main.resize": self._operation_resize,
+            "main.quantize": self._operation_quantize,
             "main.watermark": self._operation_watermark,
             "ops.greyscale": ImageOps.grayscale,
             "ops.fit": ImageOps.fit,
@@ -977,6 +1012,16 @@ class Image:
         im.putalpha(alpha)
         return im
 
+    @staticmethod
+    def _operation_convert(image: PILImage.Image, *args, **kwargs):
+        return image.convert(*args, **kwargs)
+
+    @staticmethod
+    def _operation_convert_mode_p(img: PILImage.Image):
+        if img.mode == "P":
+            return img
+        return img.convert("P")
+
     def _operation_remove_alpha(self, image: PILImage.Image) -> PILImage.Image:
         """Remove the alpha channel"""
         if not self.is_alpha(image):
@@ -991,6 +1036,10 @@ class Image:
     def _operation_resize(image, *args, **kwargs):
         image.thumbnail(*args, **kwargs)
         return image
+
+    @staticmethod
+    def _operation_quantize(image: PILImage.Image, *args, **kwargs):
+        return image.quantize(*args, **kwargs)
 
     @staticmethod
     def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
