@@ -1960,16 +1960,30 @@ def handle_signal_all_generators_finalized(
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
             article: Article
-            for article in itertools.chain(
-                generator.articles, generator.translations, generator.drafts
-            ):
+            article_lists: List[List[Article]] = [
+                generator.articles,
+                generator.translations,
+                generator.drafts,
+                generator.drafts_translations,
+            ]
+            # Support for hidden articles has been added in Pelican 4.7
+            if hasattr(generator, "hidden_articles"):
+                article_lists.extend(
+                    [generator.hidden_articles, generator.hidden_translations]
+                )
+            for article in itertools.chain.from_iterable(article_lists):
                 detect_meta_images(article)
                 detect_meta_galleries(article)
                 article.photo_global_images = global_images
         elif isinstance(generator, PagesGenerator):
             page: Page
             for page in itertools.chain(
-                generator.pages, generator.translations, generator.hidden_pages
+                generator.pages,
+                generator.translations,
+                generator.hidden_pages,
+                generator.hidden_translations,
+                generator.draft_pages,
+                generator.draft_translations,
             ):
                 detect_meta_images(page)
                 detect_meta_galleries(page)
