@@ -210,7 +210,6 @@ def get_image_from_string(
     kwargs = {}
     for query_name, arg_name in value_mapping.items():
         if query_name in query_params:
-            print(query_params.get(query_name))
             kwargs[arg_name] = query_params.get(query_name)
 
     if image_class is None and "type" in query_params:
