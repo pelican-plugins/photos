@@ -34,7 +34,7 @@ jobs:
         id: poetry-cache
         with:
           path: ~/.cache/pypoetry/virtualenvs
-          key: poetry-${{ hashFiles('**/pyproject.toml') }}
+          key: poetry-${{ hashFiles('**/pyproject.toml') }}-${{ matrix.python-version }}
       - name: Install dependencies
         run: |
           poetry run pip install --upgrade pip
