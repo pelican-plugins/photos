@@ -334,12 +334,18 @@ class BaseImage:
 
         self.file = os.path.basename(self.filename).lower()
 
-        if profile is None:
+        self.profile = profile
+
+        if self.profile is None:
             if profile_name is None:
                 profile_name = "default"
-            self.profile = get_profile(profile_name)
-        else:
-            self.profile = profile
+            try:
+                self.profile = get_profile(profile_name)
+            except ProfileNotFound as e:
+                logger.error(
+                    f"Unable to find profile '{profile_name}' for image '{filename}'"
+                )
+                raise e
 
 
 class ArticleImage(BaseImage):
