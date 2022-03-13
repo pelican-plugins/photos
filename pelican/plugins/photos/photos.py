@@ -1386,6 +1386,7 @@ def initialized(pelican: Pelican):
                 }
 
         pelican.settings.setdefault("PHOTO_RESULT_IMAGE_AVERAGE_COLOR", False)
+        pelican.settings.setdefault("PHOTO_GLOBAL_IMAGES_PROCESSED", {})
 
     global pelican_settings
     pelican_settings = pelican.settings
@@ -1947,6 +1948,8 @@ def handle_signal_all_generators_finalized(
             )
         except (FileNotFound, InternalError) as e:
             logger.error(f"photo: {str(e)}")
+
+    pelican_settings["PHOTO_GLOBAL_IMAGES_PROCESSED"].update(global_images)
 
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
