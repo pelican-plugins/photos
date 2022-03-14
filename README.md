@@ -37,7 +37,7 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 :	Crops thumbnails to make them square.
 
 `PHOTO_RESIZE_JOBS = 5`
-: Number of parallel resize jobs to be run. Defaults to 1.
+: Number of parallel resize jobs to be run. Defaults to -1 on Windows machines and to 1 on other operating systems. Values other than -1 will probably not work on Windows.
 
 - `-1` = Do not use the Python multiprocessing module and enable additional debugging
 - `0` = Try to detect cpu count and start `CPU_COUNT + 1` processes
