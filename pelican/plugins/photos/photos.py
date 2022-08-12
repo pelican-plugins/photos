@@ -235,6 +235,7 @@ class BaseNoteCache:
 
     def __init__(self, filename):
         self.filename = filename
+        self.note_cache[self.filename] = self
         self.notes: Dict[str, str] = {}
         self._read()
 
@@ -438,6 +439,10 @@ class ContentImage(BaseImage):
             specs=self.profile.article_image_spec,
         )
         self.image = enqueue_image(img)
+
+    @property
+    def caption(self) -> Optional[Caption]:
+        return self.image.caption
 
 
 class ContentImageLightbox(BaseImage):
