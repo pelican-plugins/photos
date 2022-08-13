@@ -1244,6 +1244,8 @@ class SourceImage:
         self.filename = filename
         #: mime-type of the image
         self.mimetype, _ = mimetypes.guess_type(filename)
+        if not self.mimetype:
+            raise InternalError(f"Unable to get MIME type of '{self.filename}'")
         _, _, image_type = self.mimetype.partition("/")
         #: type of the image. Mostly the second part of the mime-type (jpeg, png, ...)
         self.type = image_type.lower()
