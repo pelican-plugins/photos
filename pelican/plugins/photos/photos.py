@@ -540,6 +540,8 @@ class Gallery:
                 continue
             if pic.endswith(".txt"):
                 continue
+            if not os.path.isfile(os.path.join(dir_gallery, pic)):
+                continue
             image_filenames.append(
                 f"{location_parsed['type']}{location_parsed['location']}/{pic}"
             )
