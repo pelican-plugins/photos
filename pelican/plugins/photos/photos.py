@@ -64,7 +64,11 @@ class GalleryNotFound(Exception):
     pass
 
 
-class ImageExcluded(Exception):
+class FileExcluded(Exception):
+    pass
+
+
+class ImageExcluded(FileExcluded):
     pass
 
 
@@ -240,11 +244,24 @@ class BaseNoteCache:
         self._read()
 
     def _read(self):
+        if not os.path.isfile(self.filename):
+            return
+
         try:
+            logger.debug(f"Reading information from {self.filename}")
             with pelican_open(self.filename) as text:
-                for line in text.splitlines():
+                for line_number, line in enumerate(text.splitlines()):
+                    line = line.strip()
+
+                    # skip empty lines
+                    if len(line) == 0:
+                        continue
+
+                    # skip comments
                     if line.startswith("#"):
                         continue
+
+                    # parse content
                     m = line.split(":", 1)
                     if len(m) > 1:
                         pic = m[0].strip()
@@ -252,11 +269,15 @@ class BaseNoteCache:
                         if pic and note:
                             self.notes[pic] = note
                     else:
+                        logger.warning(
+                            f"Wrong format in file {self.filename} on line "
+                            f"{line_number + 1}"
+                        )
                         self.notes[line] = ""
         except Exception as e:
-            logger.debug(
-                f"photos: read_notes issue at file {self.filename}. "
-                f"Debug message:{e}"
+            logger.error(
+                f"There was an error while processing the {self.filename}. "
+                f"Exception message: {e}"
             )
 
     def get_value(self, source_image):
@@ -540,6 +561,8 @@ class Gallery:
                 continue
             if pic.endswith(".txt"):
                 continue
+            if not os.path.isfile(os.path.join(dir_gallery, pic)):
+                continue
             image_filenames.append(
                 f"{location_parsed['type']}{location_parsed['location']}/{pic}"
             )
@@ -559,6 +582,8 @@ class Gallery:
                 )
             except ImageExcluded:
                 logger.debug(f"photos: Image {pic} excluded")
+            except FileExcluded as e:
+                logger.debug(f"photos: File {pic} excluded: {str(e)}")
 
     def __getitem__(self, item):
         if item == 0:
@@ -1244,7 +1269,15 @@ class SourceImage:
         self.filename = filename
         #: mime-type of the image
         self.mimetype, _ = mimetypes.guess_type(filename)
-        _, _, image_type = self.mimetype.partition("/")
+        if not self.mimetype:
+            raise InternalError(f"Unable to get MIME type of '{self.filename}'")
+        file_type, _, image_type = self.mimetype.partition("/")
+        if file_type != "image":
+            raise FileExcluded(
+                f"Skipe file '{self.filename}' because MIME type is '{file_type}' "
+                "but must be not 'image'."
+            )
+
         #: type of the image. Mostly the second part of the mime-type (jpeg, png, ...)
         self.type = image_type.lower()
 
