@@ -244,11 +244,24 @@ class BaseNoteCache:
         self._read()
 
     def _read(self):
+        if not os.path.isfile(self.filename):
+            return
+
         try:
+            logger.debug(f"Reading information from {self.filename}")
             with pelican_open(self.filename) as text:
-                for line in text.splitlines():
+                for line_number, line in enumerate(text.splitlines()):
+                    line = line.strip()
+
+                    # skip empty lines
+                    if len(line) == 0:
+                        continue
+
+                    # skip comments
                     if line.startswith("#"):
                         continue
+
+                    # parse content
                     m = line.split(":", 1)
                     if len(m) > 1:
                         pic = m[0].strip()
@@ -256,11 +269,15 @@ class BaseNoteCache:
                         if pic and note:
                             self.notes[pic] = note
                     else:
+                        logger.warning(
+                            f"Wrong format in file {self.filename} on line "
+                            f"{line_number + 1}"
+                        )
                         self.notes[line] = ""
         except Exception as e:
-            logger.debug(
-                f"photos: read_notes issue at file {self.filename}. "
-                f"Debug message:{e}"
+            logger.error(
+                f"There was an error while processing the {self.filename}. "
+                f"Exception message: {e}"
             )
 
     def get_value(self, source_image):
