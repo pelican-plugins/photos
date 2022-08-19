@@ -823,7 +823,7 @@ class Image:
         )
 
         #: The name and path for the web page
-        self.web_filename = "{resized}.{extension}".format(
+        self.web_filename = "/{resized}.{extension}".format(
             resized=self.dst,
             extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
                 self.type, self.type
@@ -1942,7 +1942,7 @@ def replace_inline_images(content, inline_images):
                         m.group("src"),
                         "=",
                         m.group("quote"),
-                        os.path.join(
+                        urllib.parse.urljoin(
                             pelican_settings["SITEURL"], image.image.web_filename
                         ),
                         m.group("quote"),
@@ -1978,7 +1978,7 @@ def replace_inline_images(content, inline_images):
                     (
                         "<a href=",
                         m.group("quote"),
-                        os.path.join(
+                        urllib.parse.urljoin(
                             pelican_settings["SITEURL"], image.image.web_filename
                         ),
                         m.group("quote"),
@@ -1987,7 +1987,7 @@ def replace_inline_images(content, inline_images):
                         m.group("attrs_before"),
                         "src=",
                         m.group("quote"),
-                        os.path.join(
+                        urllib.parse.urljoin(
                             pelican_settings["SITEURL"], image.thumb.web_filename
                         ),
                         m.group("quote"),
