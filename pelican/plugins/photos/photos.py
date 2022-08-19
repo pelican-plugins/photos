@@ -736,6 +736,8 @@ class Image:
         self._result_info_allowed_names = ("_average_color", "_height", "_width")
         self.images = {}
 
+        self.icc_profile: Optional[bytes] = None
+
         if spec is None:
             if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
@@ -1027,6 +1029,9 @@ class Image:
             return self.dst, self._load_result_info()
 
         image = self.source_image.open()
+        if "icc_profile" in image.info:
+            self.icc_profile = image.info["icc_profile"]
+
         operations = self.pre_operations + self.operations + self.post_operations
         for i, operation in enumerate(operations):
             operation_args = []
@@ -1065,13 +1070,11 @@ class Image:
         #         exif_copy = b""
         # else:
         #     exif_copy = b""
-        #
-        # icc_profile = im.info.get("icc_profile", None)
 
         image.save(
             self.output_filename,
             self.type,
-            # icc_profile=icc_profile,
+            icc_profile=self.icc_profile,
             # exif=exif_copy,
             **image_options,
         )
