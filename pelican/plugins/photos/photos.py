@@ -31,8 +31,9 @@ g_profiles = {}
 
 
 try:
+    from PIL import ExifTags
     from PIL import Image as PILImage
-    from PIL import ExifTags, ImageDraw, ImageEnhance, ImageFont, ImageOps
+    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
 except ImportError as e:
     logger.error("PIL/Pillow not found")
     raise e
@@ -834,6 +835,7 @@ class Image:
         self.post_operations: List[Union[str, List, Tuple]] = []
 
         self.pre_operations.append("exif.rotate")
+        self.pre_operations.append("exif.manipulate")
 
         if self.type in ("jpeg",):
             self.pre_operations.append("main.remove_alpha")
@@ -901,7 +903,10 @@ class Image:
             "ops.greyscale": ImageOps.grayscale,
             "ops.fit": ImageOps.fit,
         }
-        self.advanced_operation_mappings = {"exif.rotate": self._operation_exif_rotate}
+        self.advanced_operation_mappings = {
+            "exif.rotate": self._operation_exif_rotate,
+            "exif.manipulate": self._operation_manipulate_exif,
+        }
 
     def __str__(self):
         return self.web_filename
@@ -992,37 +997,6 @@ class Image:
                 setattr(self, name, info[name])
         self._result_info_loaded = True
 
-    def manipulate_exif(self, img: PILImage.Image) -> Tuple[PILImage.Image, str]:
-        try:
-            exif = piexif.load(img.info["exif"])
-        except Exception:
-            logger.debug("EXIF information not found")
-            exif = {}
-
-        if pelican_settings["PHOTO_EXIF_AUTOROTATE"]:
-            img, exif = self.rotate(img, exif)
-
-        if pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
-            exif.pop("GPS")
-
-        if pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
-            # Be minimally destructive to any preset EXIF author or copyright
-            # information. If there is copyright or author information, prefer that
-            # over everything else.
-            if not exif["0th"].get(piexif.ImageIFD.Artist):
-                exif["0th"][piexif.ImageIFD.Artist] = pelican_settings[
-                    "PHOTO_EXIF_COPYRIGHT_AUTHOR"
-                ]
-                author = pelican_settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
-
-            if not exif["0th"].get(piexif.ImageIFD.Copyright):
-                license = build_license(
-                    pelican_settings["PHOTO_EXIF_COPYRIGHT"], author
-                )
-                exif["0th"][piexif.ImageIFD.Copyright] = license
-
-        return img, piexif.dump(exif)
-
     def process(self) -> Tuple[str, Dict[str, Any]]:
         """Process the image"""
         process = multiprocessing.current_process()
@@ -1045,11 +1019,14 @@ class Image:
             self.icc_profile = image.info["icc_profile"]
 
         self.exif_orig = image.getexif()
-        self.exif_result = PILImage.Exif()
-
-        # Copy the exif data if we want to keep it
-        if pelican_settings["PHOTO_EXIF_KEEP"]:
-            self.exif_result.load(self.exif_orig.tobytes())
+        if ispiexif:
+            if pelican_settings["PHOTO_EXIF_KEEP"] and "exif" in image.info:
+                # Copy the exif data if we want to keep it
+                self.exif_result = piexif.load(image.info["exif"])
+            else:
+                self.exif_result = {}
+        else:
+            logger.info("Unable to keep exif data if piexif is not installed")
 
         operations = self.pre_operations + self.operations + self.post_operations
         for i, operation in enumerate(operations):
@@ -1088,11 +1065,17 @@ class Image:
             except Exception:
                 logger.exception(f"Could not create {directory}")
 
+        exif_data = b""
+        if ispiexif and self.exif_result:
+            # from pprint import pprint
+            # pprint(self.exif_result)
+            exif_data = piexif.dump(self.exif_result)
+
         image.save(
             self.output_filename,
             self.type,
             icc_profile=self.icc_profile,
-            exif=self.exif_result,
+            exif=exif_data,
             **image_options,
         )
         return self.dst, self._load_result_info(image=image)
@@ -1147,7 +1130,36 @@ class Image:
         elif orientation == 8:
             image = image.rotate(90)
 
-        image_meta.exif_result[EXIF_TAGS_NAME_CODE["Orientation"]] = 1
+        if ispiexif and image_meta.exif_result:
+            image_meta.exif_result["0th"][piexif.ImageIFD.Orientation] = 1
+
+        return image
+
+    @staticmethod
+    def _operation_manipulate_exif(
+        image: PILImage.Image, image_meta: "Image"
+    ) -> PILImage.Image:
+        if image_meta.exif_result is None:
+            return image
+
+        if pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
+            # print("pop gps")
+            image_meta.exif_result.pop("GPS")
+
+        if pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
+            # Be minimally destructive to any preset EXIF author or copyright
+            # information. If there is copyright or author information, prefer that
+            # over everything else.
+            author = pelican_settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
+
+            if not image_meta.exif_result["0th"].get(piexif.ImageIFD.Artist):
+                image_meta.exif_result["0th"][piexif.ImageIFD.Artist] = author
+
+            if not image_meta.exif_result["0th"].get(piexif.ImageIFD.Copyright):
+                license = build_license(
+                    pelican_settings["PHOTO_EXIF_COPYRIGHT"], author
+                )
+                image_meta.exif_result["0th"][piexif.ImageIFD.Copyright] = license
 
         return image
 
