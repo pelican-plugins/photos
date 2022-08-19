@@ -32,10 +32,12 @@ g_profiles = {}
 
 try:
     from PIL import Image as PILImage
-    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
+    from PIL import ExifTags, ImageDraw, ImageEnhance, ImageFont, ImageOps
 except ImportError as e:
     logger.error("PIL/Pillow not found")
     raise e
+
+EXIF_TAGS_NAME_CODE = {v: n for n, v in ExifTags.TAGS.items()}
 
 try:
     import piexif
@@ -736,6 +738,13 @@ class Image:
         self._result_info_allowed_names = ("_average_color", "_height", "_width")
         self.images = {}
 
+        #: The exif data used for the result image
+        self.exif_result: Optional[Dict] = None
+
+        #: The exif data from the source image
+        self.exif_orig: Optional[Dict] = None
+
+        #: The icc profile from the source image
         self.icc_profile: Optional[bytes] = None
 
         if spec is None:
@@ -824,6 +833,8 @@ class Image:
         self.operations: List[Union[str, List, Tuple]] = []
         self.post_operations: List[Union[str, List, Tuple]] = []
 
+        self.pre_operations.append("exif.rotate")
+
         if self.type in ("jpeg",):
             self.pre_operations.append("main.remove_alpha")
 
@@ -890,6 +901,7 @@ class Image:
             "ops.greyscale": ImageOps.grayscale,
             "ops.fit": ImageOps.fit,
         }
+        self.advanced_operation_mappings = {"exif.rotate": self._operation_exif_rotate}
 
     def __str__(self):
         return self.web_filename
@@ -1032,6 +1044,13 @@ class Image:
         if "icc_profile" in image.info:
             self.icc_profile = image.info["icc_profile"]
 
+        self.exif_orig = image.getexif()
+        self.exif_result = PILImage.Exif()
+
+        # Copy the exif data if we want to keep it
+        if pelican_settings["PHOTO_EXIF_KEEP"]:
+            self.exif_result.load(self.exif_orig.tobytes())
+
         operations = self.pre_operations + self.operations + self.post_operations
         for i, operation in enumerate(operations):
             operation_args = []
@@ -1050,7 +1069,16 @@ class Image:
 
             logger.debug(f"Processing({self.output_filename}): {i}={operation_name}")
             func = self.operation_mappings.get(operation_name)
-            image = func(image, *operation_args, **operation_kwargs)
+            advanced_func = self.advanced_operation_mappings.get(operation_name)
+            if func:
+                image = func(image, *operation_args, **operation_kwargs)
+            elif advanced_func:
+                image = advanced_func(image, self, *operation_args, **operation_kwargs)
+            else:
+                logger.warning(
+                    f"Unable to find operation: '{operation_name}' "
+                    f"for destination image '{self.dst}'"
+                )
 
         image_options = self.spec.get("options", {})
         directory = os.path.dirname(self.output_filename)
@@ -1060,22 +1088,11 @@ class Image:
             except Exception:
                 logger.exception(f"Could not create {directory}")
 
-        # if (
-        #     ispiexif and pelican_settings["PHOTO_EXIF_KEEP"] and im.format == "JPEG"
-        # ):  # Only works with JPEG exif for sure.
-        #     try:
-        #         im, exif_copy = manipulate_exif(im)
-        #     except Exception:
-        #         logger.info(f"photos: no EXIF or EXIF error in {orig}")
-        #         exif_copy = b""
-        # else:
-        #     exif_copy = b""
-
         image.save(
             self.output_filename,
             self.type,
             icc_profile=self.icc_profile,
-            # exif=exif_copy,
+            exif=self.exif_result,
             **image_options,
         )
         return self.dst, self._load_result_info(image=image)
@@ -1107,6 +1124,33 @@ class Image:
             return img
         return img.convert("P")
 
+    @staticmethod
+    def _operation_exif_rotate(
+        image: PILImage.Image, image_meta: "Image"
+    ) -> PILImage.Image:
+        """Rotate the image with the information from exif data"""
+        orientation = image_meta.exif_orig.get(EXIF_TAGS_NAME_CODE["Orientation"])
+        if orientation is None:
+            return image
+        if orientation == 2:
+            image = image.transpose(PILImage.FLIP_LEFT_RIGHT)
+        elif orientation == 3:
+            image = image.rotate(180)
+        elif orientation == 4:
+            image = image.rotate(180).transpose(PILImage.FLIP_LEFT_RIGHT)
+        elif orientation == 5:
+            image = image.rotate(-90).transpose(PILImage.FLIP_LEFT_RIGHT)
+        elif orientation == 6:
+            image = image.rotate(-90, expand=True)
+        elif orientation == 7:
+            image = image.rotate(90).transpose(PILImage.FLIP_LEFT_RIGHT)
+        elif orientation == 8:
+            image = image.rotate(90)
+
+        image_meta.exif_result[EXIF_TAGS_NAME_CODE["Orientation"]] = 1
+
+        return image
+
     def _operation_remove_alpha(self, image: PILImage.Image) -> PILImage.Image:
         """Remove the alpha channel"""
         if not self.is_alpha(image):
@@ -1125,28 +1169,6 @@ class Image:
     @staticmethod
     def _operation_quantize(image: PILImage.Image, *args, **kwargs):
         return image.quantize(*args, **kwargs)
-
-    @staticmethod
-    def rotate(img: PILImage.Image, exif_dict) -> PILImage.Image:
-        """Rotate the image with the information from exif data"""
-        if "exif" in img.info and piexif.ImageIFD.Orientation in exif_dict["0th"]:
-            orientation = exif_dict["0th"].pop(piexif.ImageIFD.Orientation)
-            if orientation == 2:
-                img = img.transpose(PILImage.FLIP_LEFT_RIGHT)
-            elif orientation == 3:
-                img = img.rotate(180)
-            elif orientation == 4:
-                img = img.rotate(180).transpose(PILImage.FLIP_LEFT_RIGHT)
-            elif orientation == 5:
-                img = img.rotate(-90).transpose(PILImage.FLIP_LEFT_RIGHT)
-            elif orientation == 6:
-                img = img.rotate(-90, expand=True)
-            elif orientation == 7:
-                img = img.rotate(90).transpose(PILImage.FLIP_LEFT_RIGHT)
-            elif orientation == 8:
-                img = img.rotate(90)
-
-        return img, exif_dict
 
     def _operation_watermark(self, image: PILImage.Image) -> PILImage.Image:
         """Add the watermark"""
