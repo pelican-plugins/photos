@@ -1278,10 +1278,9 @@ class ImageSrcSet(list):
         img: SrcSetImage
         for img in self:
             items.append(
-                "{url} {descriptor}".format(
-                    url=urllib.parse.urljoin(
-                        pelican_settings["SITEURL"], img.web_filename
-                    ),
+                "{siteurl}/{filename} {descriptor}".format(
+                    siteurl=pelican_settings["SITEURL"],
+                    filename=img.web_filename,
                     descriptor=img.descriptor,
                 )
             )
@@ -1942,8 +1941,9 @@ def replace_inline_images(content, inline_images):
                         m.group("src"),
                         "=",
                         m.group("quote"),
-                        os.path.join(
-                            pelican_settings["SITEURL"], image.image.web_filename
+                        "{siteurl}/{filename}".format(
+                            siteurl=pelican_settings["SITEURL"],
+                            filename=image.image.web_filename,
                         ),
                         m.group("quote"),
                         extra_attributes,
@@ -1978,8 +1978,9 @@ def replace_inline_images(content, inline_images):
                     (
                         "<a href=",
                         m.group("quote"),
-                        os.path.join(
-                            pelican_settings["SITEURL"], image.image.web_filename
+                        "{siteurl}/{filename}".format(
+                            siteurl=pelican_settings["SITEURL"],
+                            filename=image.image.web_filename,
                         ),
                         m.group("quote"),
                         lightbox_attrs,
@@ -1987,8 +1988,9 @@ def replace_inline_images(content, inline_images):
                         m.group("attrs_before"),
                         "src=",
                         m.group("quote"),
-                        os.path.join(
-                            pelican_settings["SITEURL"], image.thumb.web_filename
+                        "{siteurl}/{filename}".format(
+                            siteurl=pelican_settings["SITEURL"],
+                            filename=image.thumb.web_filename,
                         ),
                         m.group("quote"),
                         extra_attributes,
