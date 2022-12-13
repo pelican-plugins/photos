@@ -2,6 +2,9 @@ AUTHOR = "Pelican Plugin Team"
 SITENAME = "Photos Demo"
 SITEURL = ""
 
+PLUGIN_PATHS = ("../pelican/plugins",)
+PLUGINS = ["photos"]
+
 PATH = "content"
 
 ARTICLE_PATHS = ["articles"]
@@ -9,6 +12,7 @@ ARTICLE_PATHS = ["articles"]
 PAGE_PATHS = ["pages"]
 
 THEME = "./themes/notmyidea_photos"
+
 
 TIMEZONE = "Europe/Berlin"
 
