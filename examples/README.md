@@ -30,6 +30,20 @@ If everything has been successful you can start the build process.
 make devserver
 ```
 
+Profile the code
+----------------
+
+Running the following command will use the Python [cProfile](https://docs.python.org/3/library/profile.html#module-cProfile) module to analyse/profile the Python code and the function calls.
+
+```shell
+make html-profile
+```
+
+By default it will create a file called ```pelican.pstats```. To dig deeper into the pstats file you can use some 3party tools/viwers.
+
+- https://github.com/jiffyclub/snakeviz/
+- https://github.com/jrfonseca/gprof2dot
+
 License
 -------
 

@@ -26,12 +26,15 @@ ifneq ($(PORT), 0)
 	PELICANOPTS += -p $(PORT)
 endif
 
+PROFILE_OUTFILE ?= "pelican.pstats"
 
 help:
 	@echo 'Makefile for a pelican Web site                                              '
 	@echo '                                                                             '
 	@echo 'Usage:                                                                       '
 	@echo '   make html                              (re)generate the web site          '
+	@echo '   make html-profile [PROFILE_OUTFILE=pelican.pstats]                        '
+	@echo '                                        (re)generate the web site and profile'
 	@echo '   make clean                             remove the generated files         '
 	@echo '   make regenerate                        regenerate files upon modification '
 	@echo '   make publish                           generate using production settings '
@@ -47,8 +50,12 @@ help:
 html:
 	"$(PELICAN)" "$(INPUTDIR)" -o "$(OUTPUTDIR)" -s "$(CONFFILE)" $(PELICANOPTS)
 
+html-profile:
+	python -m cProfile --outfile="$(PROFILE_OUTFILE)"  $(shell which $(PELICAN))  "$(INPUTDIR)" -o "$(OUTPUTDIR)" -s "$(CONFFILE)" $(PELICANOPTS)
+
 clean:
 	[ ! -d "$(OUTPUTDIR)" ] || rm -rf "$(OUTPUTDIR)"
+	rm -f "$(PROFILE_OUTFILE)"
 
 regenerate:
 	"$(PELICAN)" -r "$(INPUTDIR)" -o "$(OUTPUTDIR)" -s "$(CONFFILE)" $(PELICANOPTS)
@@ -69,4 +76,4 @@ publish:
 	"$(PELICAN)" "$(INPUTDIR)" -o "$(OUTPUTDIR)" -s "$(PUBLISHCONF)" $(PELICANOPTS)
 
 
-.PHONY: html help clean regenerate serve serve-global devserver publish
+.PHONY: html html-profile help clean regenerate serve serve-global devserver publish
