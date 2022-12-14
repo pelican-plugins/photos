@@ -3,6 +3,7 @@ from collections import namedtuple
 import datetime
 from html.parser import HTMLParser
 import itertools
+from functools import wraps
 import json
 import logging
 import mimetypes
@@ -11,6 +12,7 @@ import os
 import pprint
 import queue
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
@@ -28,7 +30,7 @@ pelican_photo_inline_galleries = {}
 g_generator = None
 g_image_queue = queue.Queue()
 g_profiles = {}
-
+g_profiling_call_level = 0
 
 try:
     from PIL import ExifTags
@@ -183,6 +185,44 @@ class Profile:
         return self.get_image_config("thumb")["specs"]
 
 
+def measure_time(func):
+    @wraps(func)
+    def measure_time_wrapper(*args, **kwargs):
+        if not pelican_settings["PHOTO_PROFILING_ENABLED"]:
+            return func(*args, **kwargs)
+
+        global g_profiling_call_level
+
+        resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
+
+        msg_prefix_start = ""
+        msg_prefix_end = ""
+        if g_profiling_call_level > 0:
+            msg_prefix_start = "|" * g_profiling_call_level + "-> "
+            msg_prefix_end = "|" * (g_profiling_call_level - 1) + "'-> "
+
+        logger.debug(
+            f"{msg_prefix_start}Calling {func.__name__}()"
+            f" with args {args} and kwargs {kwargs}"
+        )
+        start_time = time.perf_counter()
+        # resize_job_number == -1 -> no multiprocessing
+        if resize_job_number < 0:
+            g_profiling_call_level += 1
+        result = func(*args, **kwargs)
+        if resize_job_number < 0:
+            g_profiling_call_level -= 1
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        logger.debug(
+            f"{msg_prefix_end}Call {func.__name__}()" f" took {total_time:.4f} seconds"
+        )
+        return result
+
+    return measure_time_wrapper
+
+
+@measure_time
 def find_profile(names: List[str], default_not_found=True):
     """Find first matching profile"""
     for name in names:
@@ -1466,6 +1506,7 @@ def initialized(pelican: Pelican):
 
         pelican.settings.setdefault("PHOTO_RESULT_IMAGE_AVERAGE_COLOR", False)
         pelican.settings.setdefault("PHOTO_GLOBAL_IMAGES_PROCESSED", {})
+        pelican.settings.setdefault("PHOTO_PROFILING_ENABLED", False)
 
     global pelican_settings
     pelican_settings = pelican.settings
@@ -1496,6 +1537,7 @@ def initialized(pelican: Pelican):
             g_profiles[profile_name] = g_profiles[profile_config]
 
 
+@measure_time
 def enqueue_image(img: Image) -> Image:
     """
     Add the image to the resize list. If an image with the same destination filename
@@ -1537,6 +1579,7 @@ def build_license(license, author):
         )
 
 
+@measure_time
 def process_image_queue():
     """Launch the jobs to process the images in the resize queue"""
 
@@ -1582,6 +1625,7 @@ def process_image_queue():
         DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
 
 
+@measure_time
 def detect_inline_images(content: pelican.contents.Content):
     """
     Find images in the generated content and replace them with the processed images
@@ -1708,6 +1752,7 @@ def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
         )
 
 
+@measure_time
 def process_content_galleries(
     content: Union[Article, Page],
     location,
@@ -1734,6 +1779,7 @@ def process_content_galleries(
     return photo_galleries
 
 
+@measure_time
 def detect_inline_galleries(content: Union[Article, Page]):
     """Find galleries specified as inline gallery"""
     inline_galleries = {}
@@ -1749,6 +1795,7 @@ def detect_inline_galleries(content: Union[Article, Page]):
     return inline_galleries
 
 
+@measure_time
 def detect_inline_contents(content: Union[Article, Page]):
     """Find inline galleries, images, ..."""
     if not pelican_settings["PHOTO_INLINE_ENABLED"]:
@@ -1838,6 +1885,7 @@ def detect_meta_images(content: pelican.contents.Content):
         content.photo_images = images
 
 
+@measure_time
 def replace_inline_contents(content, inline_contents):
     for content_string, content_info in inline_contents.items():
         image = content_info.image
@@ -1879,6 +1927,7 @@ def replace_inline_contents(content, inline_contents):
         )
 
 
+@measure_time
 def replace_inline_galleries(content, inline_galleries):
     for gallery_string, galleries in inline_galleries.items():
         template = g_generator.get_template(
@@ -1897,6 +1946,7 @@ def replace_inline_galleries(content, inline_galleries):
         )
 
 
+@measure_time
 def replace_inline_images(content, inline_images):
     for image_string, image_info in inline_images.items():
         m = image_info["match"]
@@ -2006,6 +2056,7 @@ def handle_signal_generator_init(generator):
     g_generator = generator
 
 
+@measure_time
 def handle_signal_content_object_init(content: pelican.contents.Content):
     if not isinstance(content, (Article, Page)):
         return
@@ -2018,6 +2069,7 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
     replace_inline_contents(content, inline_contents)
 
 
+@measure_time
 def handle_signal_all_generators_finalized(
     generators: List[pelican.generators.Generator],
 ):
