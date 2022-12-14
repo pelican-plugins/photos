@@ -10,7 +10,6 @@ import mimetypes
 import multiprocessing
 import os
 import pprint
-import queue
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
@@ -28,9 +27,10 @@ pelican_settings: Dict[str, Any] = {}
 pelican_output_path: Optional[str] = None
 pelican_photo_inline_galleries = {}
 g_generator = None
-g_image_queue = queue.Queue()
+g_image_queue = []
 g_profiles = {}
 g_profiling_call_level = 0
+g_process_pool: Optional[multiprocessing.Pool] = None
 
 try:
     from PIL import ExifTags
@@ -1405,6 +1405,7 @@ class SourceImage:
 
 def initialized(pelican: Pelican):
     """Initialize the default settings"""
+    global g_process_pool
     p = os.path.expanduser("~/Pictures")
 
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
@@ -1536,6 +1537,18 @@ def initialized(pelican: Pelican):
         if isinstance(profile_config, str):
             g_profiles[profile_name] = g_profiles[profile_config]
 
+    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
+
+    if resize_job_number == 0:
+        resize_job_number = os.cpu_count() + 1
+
+    if resize_job_number == -1:
+        g_process_pool = None
+        logger.info("Multiprocessing and process pool has been disabled")
+    else:
+        logger.info(f"Creating resize pool with {resize_job_number} worker(s)")
+        g_process_pool = multiprocessing.Pool(processes=resize_job_number)
+
 
 @measure_time
 def enqueue_image(img: Image) -> Image:
@@ -1545,7 +1558,7 @@ def enqueue_image(img: Image) -> Image:
     """
     if img.dst not in DEFAULT_CONFIG["image_cache"]:
         DEFAULT_CONFIG["image_cache"][img.dst] = img
-        g_image_queue.put(img)
+        g_image_queue.append(img)
     elif (
         DEFAULT_CONFIG["image_cache"][img.dst].source_image != img.source_image
         or DEFAULT_CONFIG["image_cache"][img.dst].spec != img.spec
@@ -1579,47 +1592,36 @@ def build_license(license, author):
         )
 
 
-@measure_time
-def process_image_queue():
-    """Launch the jobs to process the images in the resize queue"""
-
-    def apply_result_info(result: Tuple[str, Dict[str, Any]]):
-        key, info = result
-        results[key] = info
-
-    def error_callback(e: BaseException):
+def process_image_process_wrapper(image: Image):
+    """Wrapper to call an object function in the pool process"""
+    try:
+        return image.process()
+    except Exception as e:
         logger.error(f"photos: {e}")
         logger.warning("photos: An exception occurred", exc_info=e)
 
-    debug = False
-    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
-    if resize_job_number == -1:
-        debug = True
-        resize_job_number = 1
-    elif resize_job_number == 0:
-        resize_job_number = os.cpu_count() + 1
+@measure_time
+def process_image_queue():
+    """Launch the jobs to process the images in the resize queue"""
+    global g_image_queue
 
-    logger.info(f"photos: Creating resize pool with {resize_job_number} worker(s) ...")
+    logger.info(f"Found {len(g_image_queue)} images in resize queue")
+    if len(g_image_queue) == 0:
+        return
 
-    pool = multiprocessing.Pool(processes=resize_job_number)
-    logger.debug(f"Debug Status: {debug}")
-    logger.info(f"photos: {len(DEFAULT_CONFIG['image_cache'])} images in resize queue")
     results = {}
-    while not g_image_queue.empty():
-        image = g_image_queue.get()
-        if debug:
-            apply_result_info(image.process())
-        else:
-            pool.apply_async(
-                image.process,
-                callback=apply_result_info,
-                error_callback=error_callback,
-            )
-        g_image_queue.task_done()
+    image_queue = g_image_queue
+    g_image_queue = []
+    if g_process_pool is None:
+        for image in image_queue:
+            k, info = image.process()
+            results[k] = info
+    else:
+        results = dict(
+            g_process_pool.imap_unordered(process_image_process_wrapper, image_queue)
+        )
 
-    pool.close()
-    pool.join()
     logger.info("photos: Applying results")
     for k, result_info in results.items():
         DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
