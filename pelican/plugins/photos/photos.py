@@ -1,9 +1,9 @@
 import base64
 from collections import namedtuple
 import datetime
+from functools import wraps
 from html.parser import HTMLParser
 import itertools
-from functools import wraps
 import json
 import logging
 import mimetypes
