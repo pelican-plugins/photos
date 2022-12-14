@@ -1,6 +1,7 @@
 import base64
 from collections import namedtuple
 import datetime
+from functools import wraps
 from html.parser import HTMLParser
 import itertools
 import json
@@ -9,8 +10,8 @@ import mimetypes
 import multiprocessing
 import os
 import pprint
-import queue
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
@@ -26,9 +27,10 @@ pelican_settings: Dict[str, Any] = {}
 pelican_output_path: Optional[str] = None
 pelican_photo_inline_galleries = {}
 g_generator = None
-g_image_queue = queue.Queue()
+g_image_queue = []
 g_profiles = {}
-
+g_profiling_call_level = 0
+g_process_pool: Optional[multiprocessing.Pool] = None
 
 try:
     from PIL import ExifTags
@@ -183,6 +185,44 @@ class Profile:
         return self.get_image_config("thumb")["specs"]
 
 
+def measure_time(func):
+    @wraps(func)
+    def measure_time_wrapper(*args, **kwargs):
+        if not pelican_settings["PHOTO_PROFILING_ENABLED"]:
+            return func(*args, **kwargs)
+
+        global g_profiling_call_level
+
+        resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
+
+        msg_prefix_start = ""
+        msg_prefix_end = ""
+        if g_profiling_call_level > 0:
+            msg_prefix_start = "|" * g_profiling_call_level + "-> "
+            msg_prefix_end = "|" * (g_profiling_call_level - 1) + "'-> "
+
+        logger.debug(
+            f"{msg_prefix_start}Calling {func.__name__}()"
+            f" with args {args} and kwargs {kwargs}"
+        )
+        start_time = time.perf_counter()
+        # resize_job_number == -1 -> no multiprocessing
+        if resize_job_number < 0:
+            g_profiling_call_level += 1
+        result = func(*args, **kwargs)
+        if resize_job_number < 0:
+            g_profiling_call_level -= 1
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        logger.debug(
+            f"{msg_prefix_end}Call {func.__name__}()" f" took {total_time:.4f} seconds"
+        )
+        return result
+
+    return measure_time_wrapper
+
+
+@measure_time
 def find_profile(names: List[str], default_not_found=True):
     """Find first matching profile"""
     for name in names:
@@ -1365,6 +1405,7 @@ class SourceImage:
 
 def initialized(pelican: Pelican):
     """Initialize the default settings"""
+    global g_process_pool
     p = os.path.expanduser("~/Pictures")
 
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
@@ -1466,6 +1507,7 @@ def initialized(pelican: Pelican):
 
         pelican.settings.setdefault("PHOTO_RESULT_IMAGE_AVERAGE_COLOR", False)
         pelican.settings.setdefault("PHOTO_GLOBAL_IMAGES_PROCESSED", {})
+        pelican.settings.setdefault("PHOTO_PROFILING_ENABLED", False)
 
     global pelican_settings
     pelican_settings = pelican.settings
@@ -1495,7 +1537,20 @@ def initialized(pelican: Pelican):
         if isinstance(profile_config, str):
             g_profiles[profile_name] = g_profiles[profile_config]
 
+    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
+    if resize_job_number == 0:
+        resize_job_number = os.cpu_count() + 1
+
+    if resize_job_number == -1:
+        g_process_pool = None
+        logger.info("Multiprocessing and process pool has been disabled")
+    else:
+        logger.info(f"Creating resize pool with {resize_job_number} worker(s)")
+        g_process_pool = multiprocessing.Pool(processes=resize_job_number)
+
+
+@measure_time
 def enqueue_image(img: Image) -> Image:
     """
     Add the image to the resize list. If an image with the same destination filename
@@ -1503,7 +1558,7 @@ def enqueue_image(img: Image) -> Image:
     """
     if img.dst not in DEFAULT_CONFIG["image_cache"]:
         DEFAULT_CONFIG["image_cache"][img.dst] = img
-        g_image_queue.put(img)
+        g_image_queue.append(img)
     elif (
         DEFAULT_CONFIG["image_cache"][img.dst].source_image != img.source_image
         or DEFAULT_CONFIG["image_cache"][img.dst].spec != img.spec
@@ -1537,51 +1592,42 @@ def build_license(license, author):
         )
 
 
-def process_image_queue():
-    """Launch the jobs to process the images in the resize queue"""
-
-    def apply_result_info(result: Tuple[str, Dict[str, Any]]):
-        key, info = result
-        results[key] = info
-
-    def error_callback(e: BaseException):
+def process_image_process_wrapper(image: Image):
+    """Wrapper to call an object function in the pool process"""
+    try:
+        return image.process()
+    except Exception as e:
         logger.error(f"photos: {e}")
         logger.warning("photos: An exception occurred", exc_info=e)
 
-    debug = False
-    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
-    if resize_job_number == -1:
-        debug = True
-        resize_job_number = 1
-    elif resize_job_number == 0:
-        resize_job_number = os.cpu_count() + 1
+@measure_time
+def process_image_queue():
+    """Launch the jobs to process the images in the resize queue"""
+    global g_image_queue
 
-    logger.info(f"photos: Creating resize pool with {resize_job_number} worker(s) ...")
+    logger.info(f"Found {len(g_image_queue)} images in resize queue")
+    if len(g_image_queue) == 0:
+        return
 
-    pool = multiprocessing.Pool(processes=resize_job_number)
-    logger.debug(f"Debug Status: {debug}")
-    logger.info(f"photos: {len(DEFAULT_CONFIG['image_cache'])} images in resize queue")
     results = {}
-    while not g_image_queue.empty():
-        image = g_image_queue.get()
-        if debug:
-            apply_result_info(image.process())
-        else:
-            pool.apply_async(
-                image.process,
-                callback=apply_result_info,
-                error_callback=error_callback,
-            )
-        g_image_queue.task_done()
+    image_queue = g_image_queue
+    g_image_queue = []
+    if g_process_pool is None:
+        for image in image_queue:
+            k, info = image.process()
+            results[k] = info
+    else:
+        results = dict(
+            g_process_pool.imap_unordered(process_image_process_wrapper, image_queue)
+        )
 
-    pool.close()
-    pool.join()
     logger.info("photos: Applying results")
     for k, result_info in results.items():
         DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
 
 
+@measure_time
 def detect_inline_images(content: pelican.contents.Content):
     """
     Find images in the generated content and replace them with the processed images
@@ -1708,6 +1754,7 @@ def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
         )
 
 
+@measure_time
 def process_content_galleries(
     content: Union[Article, Page],
     location,
@@ -1734,6 +1781,7 @@ def process_content_galleries(
     return photo_galleries
 
 
+@measure_time
 def detect_inline_galleries(content: Union[Article, Page]):
     """Find galleries specified as inline gallery"""
     inline_galleries = {}
@@ -1749,6 +1797,7 @@ def detect_inline_galleries(content: Union[Article, Page]):
     return inline_galleries
 
 
+@measure_time
 def detect_inline_contents(content: Union[Article, Page]):
     """Find inline galleries, images, ..."""
     if not pelican_settings["PHOTO_INLINE_ENABLED"]:
@@ -1838,6 +1887,7 @@ def detect_meta_images(content: pelican.contents.Content):
         content.photo_images = images
 
 
+@measure_time
 def replace_inline_contents(content, inline_contents):
     for content_string, content_info in inline_contents.items():
         image = content_info.image
@@ -1879,6 +1929,7 @@ def replace_inline_contents(content, inline_contents):
         )
 
 
+@measure_time
 def replace_inline_galleries(content, inline_galleries):
     for gallery_string, galleries in inline_galleries.items():
         template = g_generator.get_template(
@@ -1897,6 +1948,7 @@ def replace_inline_galleries(content, inline_galleries):
         )
 
 
+@measure_time
 def replace_inline_images(content, inline_images):
     for image_string, image_info in inline_images.items():
         m = image_info["match"]
@@ -2006,6 +2058,7 @@ def handle_signal_generator_init(generator):
     g_generator = generator
 
 
+@measure_time
 def handle_signal_content_object_init(content: pelican.contents.Content):
     if not isinstance(content, (Article, Page)):
         return
@@ -2018,6 +2071,7 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
     replace_inline_contents(content, inline_contents)
 
 
+@measure_time
 def handle_signal_all_generators_finalized(
     generators: List[pelican.generators.Generator],
 ):

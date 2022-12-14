@@ -109,6 +109,9 @@ Defaults:
 `PHOTO_RESULT_IMAGE_AVERAGE_COLOR = False`
 : Calculate the average color for an result image. This can be used to provide a default background color while using lazy loading.
 
+`PHOTO_PROFILING_ENABLED = False`
+: Enable profiling of function calls and measure the time. You have to run pelican in debug mode to see the results.
+
 The plug-in automatically resizes the photos and publishes them to the following output folder:
 
     ./output/photos
