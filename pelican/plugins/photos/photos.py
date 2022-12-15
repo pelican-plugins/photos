@@ -31,6 +31,7 @@ g_image_queue = []
 g_profiles = {}
 g_profiling_call_level = 0
 g_process_pool: Optional[multiprocessing.Pool] = None
+g_image_cache: Dict[str, "Image"] = {}
 
 try:
     from PIL import ExifTags
@@ -786,6 +787,13 @@ class Image:
         #: The icc profile from the source image
         self.icc_profile: Optional[bytes] = None
 
+        # We create new instances from this class in the main process
+        # so we can access the global pelican_settings. We attach them
+        # as class var to push them to the processes when running in
+        # spawn mode.
+        #: Global pelican settings
+        self._pelican_settings = pelican_settings
+
         if spec is None:
             if specs is None:
                 raise ValueError("Only one of spec and specs must be provided")
@@ -799,7 +807,7 @@ class Image:
         #: Image type e.g. jpeg, webp
         self.type = spec["type"].lower()
 
-        image_options: Dict[str, Any] = pelican_settings[
+        image_options: Dict[str, Any] = self._pelican_settings[
             "PHOTO_DEFAULT_IMAGE_OPTIONS"
         ].get(self.type)
         if image_options is None:
@@ -855,7 +863,7 @@ class Image:
         #: The name of the output file
         self.output_filename = "{filename}.{extension}".format(
             filename=os.path.join(pelican_output_path, self.dst),
-            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
+            extension=self._pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
                 self.type, self.type
             ),
         )
@@ -863,7 +871,7 @@ class Image:
         #: The name and path for the web page
         self.web_filename = "{resized}.{extension}".format(
             resized=self.dst,
-            extension=pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
+            extension=self._pelican_settings["PHOTO_FILE_EXTENSIONS"].get(
                 self.type, self.type
             ),
         )
@@ -898,7 +906,7 @@ class Image:
 
         operations = self.spec.get("operations")
         if operations is None:
-            if self.is_thumb and pelican_settings["PHOTO_SQUARE_THUMB"]:
+            if self.is_thumb and self._pelican_settings["PHOTO_SQUARE_THUMB"]:
                 self.operations.append("ops.fit")
             else:
                 self.operations.append("main.resize")
@@ -1011,7 +1019,7 @@ class Image:
             if image is None:
                 image: PILImage.Image = PILImage.open(self.output_filename)
 
-            if pelican_settings["PHOTO_RESULT_IMAGE_AVERAGE_COLOR"]:
+            if self._pelican_settings["PHOTO_RESULT_IMAGE_AVERAGE_COLOR"]:
                 image2: PILImage.Image = image.resize((1, 1), PILImage.ANTIALIAS)
                 # We need RGB to get red, green and blue values for the pixel
                 self._average_color = image2.convert("RGB").getpixel((0, 0))
@@ -1058,7 +1066,7 @@ class Image:
 
         self.exif_orig = image.getexif()
         if ispiexif:
-            if pelican_settings["PHOTO_EXIF_KEEP"] and "exif" in image.info:
+            if self._pelican_settings["PHOTO_EXIF_KEEP"] and "exif" in image.info:
                 # Copy the exif data if we want to keep it
                 self.exif_result = piexif.load(image.info["exif"])
             else:
@@ -1173,29 +1181,28 @@ class Image:
 
         return image
 
-    @staticmethod
     def _operation_manipulate_exif(
-        image: PILImage.Image, image_meta: "Image"
+        self, image: PILImage.Image, image_meta: "Image"
     ) -> PILImage.Image:
         if image_meta.exif_result is None:
             return image
 
-        if pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
+        if self._pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
             # print("pop gps")
             image_meta.exif_result.pop("GPS")
 
-        if pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
+        if self._pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
             # Be minimally destructive to any preset EXIF author or copyright
             # information. If there is copyright or author information, prefer that
             # over everything else.
-            author = pelican_settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
+            author = self._pelican_settings["PHOTO_EXIF_COPYRIGHT_AUTHOR"]
 
             if not image_meta.exif_result["0th"].get(piexif.ImageIFD.Artist):
                 image_meta.exif_result["0th"][piexif.ImageIFD.Artist] = author
 
             if not image_meta.exif_result["0th"].get(piexif.ImageIFD.Copyright):
                 license = build_license(
-                    pelican_settings["PHOTO_EXIF_COPYRIGHT"], author
+                    self._pelican_settings["PHOTO_EXIF_COPYRIGHT"], author
                 )
                 image_meta.exif_result["0th"][piexif.ImageIFD.Copyright] = license
 
@@ -1206,7 +1213,7 @@ class Image:
         if not self.is_alpha(image):
             return image
         background = PILImage.new(
-            "RGB", image.size, pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"]
+            "RGB", image.size, self._pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"]
         )
         background.paste(image, mask=image.split()[3])  # 3 is the alpha channel
         return background
@@ -1222,9 +1229,9 @@ class Image:
 
     def _operation_watermark(self, image: PILImage.Image) -> PILImage.Image:
         """Add the watermark"""
-        if not pelican_settings["PHOTO_WATERMARK"]:
+        if not self._pelican_settings["PHOTO_WATERMARK"]:
             return image
-        if self.is_thumb and not pelican_settings["PHOTO_WATERMARK_THUMB"]:
+        if self.is_thumb and not self._pelican_settings["PHOTO_WATERMARK_THUMB"]:
             return image
         margin = [10, 10]
         opacity = 0.6
@@ -1237,31 +1244,33 @@ class Image:
         mark_size = [0, 0]
         text_position = [0, 0]
 
-        if pelican_settings["PHOTO_WATERMARK_TEXT"]:
+        if self._pelican_settings["PHOTO_WATERMARK_TEXT"]:
             font_name = "SourceCodePro-Bold.otf"
-            default_font = os.path.join(DEFAULT_CONFIG["plugin_dir"], font_name)
+            default_font = os.path.join(
+                os.path.dirname(os.path.realpath(__file__)), font_name
+            )
             font = ImageFont.FreeTypeFont(
                 default_font, watermark_layer.size[0] // text_reducer
             )
             text_size = draw_watermark.textsize(
-                pelican_settings["PHOTO_WATERMARK_TEXT"], font
+                self._pelican_settings["PHOTO_WATERMARK_TEXT"], font
             )
             text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
             draw_watermark.text(
                 text_position,
-                pelican_settings["PHOTO_WATERMARK_TEXT"],
-                pelican_settings["PHOTO_WATERMARK_TEXT_COLOR"],
+                self._pelican_settings["PHOTO_WATERMARK_TEXT"],
+                self._pelican_settings["PHOTO_WATERMARK_TEXT_COLOR"],
                 font=font,
             )
 
-        if pelican_settings["PHOTO_WATERMARK_IMG"]:
-            mark_image = PILImage.open(pelican_settings["PHOTO_WATERMARK_IMG"])
+        if self._pelican_settings["PHOTO_WATERMARK_IMG"]:
+            mark_image = PILImage.open(self._pelican_settings["PHOTO_WATERMARK_IMG"])
             mark_image_size = [
                 watermark_layer.size[0] // image_reducer for size in mark_size
             ]
             mark_image_size = (
-                pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
-                if pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
+                self._pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
+                if self._pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
                 else mark_image_size
             )
             mark_image.thumbnail(mark_image_size, PILImage.ANTIALIAS)
@@ -1428,10 +1437,6 @@ def initialized(pelican: Pelican):
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
-    DEFAULT_CONFIG["image_cache"] = {}
-    DEFAULT_CONFIG["created_galleries"] = {}
-    DEFAULT_CONFIG["plugin_dir"] = os.path.dirname(os.path.realpath(__file__))
-
     if pelican:
         pelican.settings.setdefault("PHOTO_LIBRARY", p)
         pelican.settings.setdefault("PHOTO_GALLERY", (1024, 768, 80))
@@ -1537,14 +1542,17 @@ def initialized(pelican: Pelican):
 
     resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
+    if resize_job_number < 0:
+        resize_job_number = 1
+
     if resize_job_number == 0:
         resize_job_number = os.cpu_count() + 1
 
-    if resize_job_number == -1:
+    if resize_job_number == 1:
+        logger.info("Process pool has been disabled, because we ony want 1 process")
         g_process_pool = None
-        logger.info("Multiprocessing and process pool has been disabled")
     else:
-        logger.info(f"Creating resize pool with {resize_job_number} worker(s)")
+        logger.info(f"Creating process pool with {resize_job_number} worker(s)")
         g_process_pool = multiprocessing.Pool(processes=resize_job_number)
 
 
@@ -1554,18 +1562,18 @@ def enqueue_image(img: Image) -> Image:
     Add the image to the resize list. If an image with the same destination filename
     and the same specifications does already exist it will return this instead.
     """
-    if img.dst not in DEFAULT_CONFIG["image_cache"]:
-        DEFAULT_CONFIG["image_cache"][img.dst] = img
+    if img.dst not in g_image_cache:
+        g_image_cache[img.dst] = img
         g_image_queue.append(img)
     elif (
-        DEFAULT_CONFIG["image_cache"][img.dst].source_image != img.source_image
-        or DEFAULT_CONFIG["image_cache"][img.dst].spec != img.spec
+        g_image_cache[img.dst].source_image != img.source_image
+        or g_image_cache[img.dst].spec != img.spec
     ):
         raise InternalError(
             "resize conflict for {}, {}-{} is not {}-{}".format(
                 img.dst,
-                DEFAULT_CONFIG["image_cache"][img.dst].source_image.filename,
-                DEFAULT_CONFIG["image_cache"][img.dst].spec,
+                g_image_cache[img.dst].source_image.filename,
+                g_image_cache[img.dst].spec,
                 img.source_image.filename,
                 img.spec,
             )
@@ -1575,7 +1583,9 @@ def enqueue_image(img: Image) -> Image:
 
 def build_license(license, author):
     year = datetime.datetime.now().year
-    license_file = os.path.join(DEFAULT_CONFIG["plugin_dir"], "licenses.json")
+    license_file = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), "licenses.json"
+    )
 
     with open(license_file) as data_file:
         licenses = json.load(data_file)
@@ -1613,16 +1623,22 @@ def process_image_queue():
     g_image_queue = []
     if g_process_pool is None:
         for image in image_queue:
-            k, info = image.process()
-            results[k] = info
+            result = image.process()
+            if result:
+                results.update(dict((result,)))
     else:
         results = dict(
-            g_process_pool.imap_unordered(process_image_process_wrapper, image_queue)
+            filter(
+                lambda v: v is not None,
+                g_process_pool.imap_unordered(
+                    process_image_process_wrapper, image_queue
+                ),
+            )
         )
 
-    logger.info("photos: Applying results")
+    logger.info(f"Applying results for {len(results)} generated images")
     for k, result_info in results.items():
-        DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
+        g_image_cache[k].apply_result_info(result_info)
 
 
 @measure_time
