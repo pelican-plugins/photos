@@ -1544,14 +1544,17 @@ def initialized(pelican: Pelican):
 
     resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
 
+    if resize_job_number < 0:
+        resize_job_number = 1
+
     if resize_job_number == 0:
         resize_job_number = os.cpu_count() + 1
 
-    if resize_job_number == -1:
+    if resize_job_number == 1:
+        logger.info("Process pool has been disabled, because we ony want 1 process")
         g_process_pool = None
-        logger.info("Multiprocessing and process pool has been disabled")
     else:
-        logger.info(f"Creating resize pool with {resize_job_number} worker(s)")
+        logger.info(f"Creating process pool with {resize_job_number} worker(s)")
         g_process_pool = multiprocessing.Pool(processes=resize_job_number)
 
 
@@ -1629,7 +1632,7 @@ def process_image_queue():
             g_process_pool.imap_unordered(process_image_process_wrapper, image_queue)
         )
 
-    logger.info("photos: Applying results")
+    logger.info(f"Applying results for {len(results)} generated images")
     for k, result_info in results.items():
         DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
 
