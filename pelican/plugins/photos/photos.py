@@ -1437,8 +1437,6 @@ def initialized(pelican: Pelican):
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
-    DEFAULT_CONFIG["created_galleries"] = {}
-
     if pelican:
         pelican.settings.setdefault("PHOTO_LIBRARY", p)
         pelican.settings.setdefault("PHOTO_GALLERY", (1024, 768, 80))
@@ -1625,11 +1623,17 @@ def process_image_queue():
     g_image_queue = []
     if g_process_pool is None:
         for image in image_queue:
-            k, info = image.process()
-            results[k] = info
+            result = image.process()
+            if result:
+                results.update(dict(result))
     else:
         results = dict(
-            g_process_pool.imap_unordered(process_image_process_wrapper, image_queue)
+            filter(
+                lambda v: v is not None,
+                g_process_pool.imap_unordered(
+                    process_image_process_wrapper, image_queue
+                ),
+            )
         )
 
     logger.info(f"Applying results for {len(results)} generated images")
