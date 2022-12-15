@@ -31,6 +31,7 @@ g_image_queue = []
 g_profiles = {}
 g_profiling_call_level = 0
 g_process_pool: Optional[multiprocessing.Pool] = None
+g_image_cache: Dict[str, "Image"] = {}
 
 try:
     from PIL import ExifTags
@@ -1436,7 +1437,6 @@ def initialized(pelican: Pelican):
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_GALLERY_ATTR", "data-lightbox")
     DEFAULT_CONFIG.setdefault("PHOTO_LIGHTBOX_CAPTION_ATTR", "data-title")
 
-    DEFAULT_CONFIG["image_cache"] = {}
     DEFAULT_CONFIG["created_galleries"] = {}
 
     if pelican:
@@ -1564,18 +1564,18 @@ def enqueue_image(img: Image) -> Image:
     Add the image to the resize list. If an image with the same destination filename
     and the same specifications does already exist it will return this instead.
     """
-    if img.dst not in DEFAULT_CONFIG["image_cache"]:
-        DEFAULT_CONFIG["image_cache"][img.dst] = img
+    if img.dst not in g_image_cache:
+        g_image_cache[img.dst] = img
         g_image_queue.append(img)
     elif (
-        DEFAULT_CONFIG["image_cache"][img.dst].source_image != img.source_image
-        or DEFAULT_CONFIG["image_cache"][img.dst].spec != img.spec
+        g_image_cache[img.dst].source_image != img.source_image
+        or g_image_cache[img.dst].spec != img.spec
     ):
         raise InternalError(
             "resize conflict for {}, {}-{} is not {}-{}".format(
                 img.dst,
-                DEFAULT_CONFIG["image_cache"][img.dst].source_image.filename,
-                DEFAULT_CONFIG["image_cache"][img.dst].spec,
+                g_image_cache[img.dst].source_image.filename,
+                g_image_cache[img.dst].spec,
                 img.source_image.filename,
                 img.spec,
             )
@@ -1634,7 +1634,7 @@ def process_image_queue():
 
     logger.info(f"Applying results for {len(results)} generated images")
     for k, result_info in results.items():
-        DEFAULT_CONFIG["image_cache"][k].apply_result_info(result_info)
+        g_image_cache[k].apply_result_info(result_info)
 
 
 @measure_time
