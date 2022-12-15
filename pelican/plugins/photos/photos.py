@@ -188,16 +188,14 @@ class Profile:
 def measure_time(func):
     @wraps(func)
     def measure_time_wrapper(*args, **kwargs):
-        if not pelican_settings["PHOTO_PROFILING_ENABLED"]:
+        if pelican_settings.get("PHOTO_PROFILING_ENABLED") is not True:
             return func(*args, **kwargs)
 
         global g_profiling_call_level
 
-        resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
-
         msg_prefix_start = ""
         msg_prefix_end = ""
-        if g_profiling_call_level > 0:
+        if g_process_pool is None and g_profiling_call_level > 0:
             msg_prefix_start = "|" * g_profiling_call_level + "-> "
             msg_prefix_end = "|" * (g_profiling_call_level - 1) + "'-> "
 
@@ -207,10 +205,10 @@ def measure_time(func):
         )
         start_time = time.perf_counter()
         # resize_job_number == -1 -> no multiprocessing
-        if resize_job_number < 0:
+        if g_process_pool is None:
             g_profiling_call_level += 1
         result = func(*args, **kwargs)
-        if resize_job_number < 0:
+        if g_process_pool is None:
             g_profiling_call_level -= 1
         end_time = time.perf_counter()
         total_time = end_time - start_time
