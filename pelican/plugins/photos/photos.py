@@ -1625,7 +1625,7 @@ def process_image_queue():
         for image in image_queue:
             result = image.process()
             if result:
-                results.update(dict(result))
+                results.update(dict((result,)))
     else:
         results = dict(
             filter(

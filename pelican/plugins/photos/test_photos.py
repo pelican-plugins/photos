@@ -145,7 +145,7 @@ class TestPhotos(unittest.TestCase):
         self.assertEqual(expected, self.get_article("filename").content)
 
     def test_queue_resize(self):
-        assert len(photos.DEFAULT_CONFIG["image_cache"]) == 5
+        assert len(photos.g_image_cache) == 5
         expected = [
             "photos/agallery/best",
             "photos/agallery/besta",
@@ -153,7 +153,7 @@ class TestPhotos(unittest.TestCase):
             "photos/agallery/night",
             "photos/agallery/nightt",
         ]
-        assert sorted(expected) == sorted(photos.DEFAULT_CONFIG["image_cache"].keys())
+        assert sorted(expected) == sorted(photos.g_image_cache.keys())
 
     def test_inline_regex_simple(self):
         regex = re.compile(self.settings["PHOTO_INLINE_PATTERN"])
