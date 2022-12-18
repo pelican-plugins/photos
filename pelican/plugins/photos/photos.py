@@ -58,6 +58,10 @@ InlineContentData = namedtuple(
 )
 
 
+class BaseNoteParseError(Exception):
+    pass
+
+
 class InternalError(Exception):
     pass
 
@@ -285,6 +289,9 @@ class BaseNoteCache:
         self.notes: Dict[str, str] = {}
         self._read()
 
+    def _parse_line(self, line: str) -> Tuple[str, Any]:
+        raise NotImplementedError("Line parser not implemented")
+
     def _read(self):
         if not os.path.isfile(self.filename):
             return
@@ -303,19 +310,15 @@ class BaseNoteCache:
                     if line.startswith("#"):
                         continue
 
-                    # parse content
-                    m = line.split(":", 1)
-                    if len(m) > 1:
-                        pic = m[0].strip()
-                        note = m[1].strip()
-                        if pic and note:
-                            self.notes[pic] = note
-                    else:
+                    try:
+                        result = self._parse_line(line)
+                        self.notes[result[0]] = result[1]
+                    except BaseNoteParseError as e:
                         logger.warning(
-                            f"Wrong format in file {self.filename} on line "
-                            f"{line_number + 1}"
+                            f"Parser error in file {self.filename}"
+                            f" on line {line_number + 1}: {e}"
                         )
-                        self.notes[line] = ""
+
         except Exception as e:
             logger.error(
                 f"There was an error while processing the {self.filename}. "
@@ -336,15 +339,32 @@ class BaseNoteCache:
         return notes
 
 
-class CaptionCache(BaseNoteCache):
+class BaseNoteKeyCache(BaseNoteCache):
+    def _parse_line(self, line: str) -> Tuple[str, bool]:
+        return line.strip(), True
+
+
+class BaseNoteKeyValueCache(BaseNoteCache):
+    def _parse_line(self, line: str) -> Tuple[str, str]:
+        # parse content
+        m = line.split(":", 1)
+        if len(m) > 1:
+            return m[0].strip(), m[1].strip()
+
+        raise BaseNoteParseError(
+            "Wrong format. Expecting '<filename>: <value>' per line"
+        )
+
+
+class CaptionCache(BaseNoteKeyValueCache):
     note_filename = "captions.txt"
 
 
-class ExifCache(BaseNoteCache):
+class ExifCache(BaseNoteKeyValueCache):
     note_filename = "exif.txt"
 
 
-class ExcludeCache(BaseNoteCache):
+class ExcludeCache(BaseNoteKeyCache):
     note_filename = "blacklist.txt"
 
 
