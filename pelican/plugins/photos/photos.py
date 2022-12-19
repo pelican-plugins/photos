@@ -1214,6 +1214,7 @@ class Image:
             image = image.rotate(90)
 
         if ispiexif and image_meta.exif_result:
+            image_meta.exif_result.setdefault("0th", {})
             image_meta.exif_result["0th"][piexif.ImageIFD.Orientation] = 1
 
         return image
@@ -1230,6 +1231,7 @@ class Image:
             image_meta.exif_result.pop("GPS", None)
 
         if self._pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
+            image_meta.exif_result.setdefault("0th", {})
             # Be minimally destructive to any preset EXIF author or copyright
             # information. If there is copyright or author information, prefer that
             # over everything else.
