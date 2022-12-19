@@ -1208,8 +1208,9 @@ class Image:
             return image
 
         if self._pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
-            # print("pop gps")
-            image_meta.exif_result.pop("GPS")
+            # Remove GPS data from exif
+            # but don't raise an exception if it does not exist
+            image_meta.exif_result.pop("GPS", None)
 
         if self._pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
             # Be minimally destructive to any preset EXIF author or copyright
