@@ -1088,7 +1088,13 @@ class Image:
         if ispiexif:
             if self._pelican_settings["PHOTO_EXIF_KEEP"] and "exif" in image.info:
                 # Copy the exif data if we want to keep it
-                self.exif_result = piexif.load(image.info["exif"])
+                try:
+                    self.exif_result = piexif.load(image.info["exif"])
+                except Exception as e:
+                    logger.warning(
+                        "There was an error reading exif data from"
+                        f" '{self.source_image.filename}': {e}"
+                    )
             else:
                 self.exif_result = {}
         else:
@@ -1133,9 +1139,20 @@ class Image:
 
         exif_data = b""
         if ispiexif and self.exif_result:
-            # from pprint import pprint
-            # pprint(self.exif_result)
-            exif_data = piexif.dump(self.exif_result)
+            try:
+                # Prevent error with piexif issue
+                # "dump" got wrong type of exif value. 41729 in Exif IFD.
+                # Got as <class 'int'>.
+                # See bug https://github.com/hMatoba/Piexif/issues/95
+                self.exif_result.pop(piexif.ExifIFD.SceneType, None)
+
+                exif_data = piexif.dump(self.exif_result)
+            except Exception as e:
+                logger.warning(
+                    "There was an error dumping exif data for image "
+                    f" '{self.output_filename}': {e}"
+                )
+                exif_data = b""
 
         image.save(
             self.output_filename,
@@ -1197,6 +1214,7 @@ class Image:
             image = image.rotate(90)
 
         if ispiexif and image_meta.exif_result:
+            image_meta.exif_result.setdefault("0th", {})
             image_meta.exif_result["0th"][piexif.ImageIFD.Orientation] = 1
 
         return image
@@ -1208,10 +1226,12 @@ class Image:
             return image
 
         if self._pelican_settings["PHOTO_EXIF_REMOVE_GPS"]:
-            # print("pop gps")
-            image_meta.exif_result.pop("GPS")
+            # Remove GPS data from exif
+            # but don't raise an exception if it does not exist
+            image_meta.exif_result.pop("GPS", None)
 
         if self._pelican_settings["PHOTO_EXIF_COPYRIGHT"]:
+            image_meta.exif_result.setdefault("0th", {})
             # Be minimally destructive to any preset EXIF author or copyright
             # information. If there is copyright or author information, prefer that
             # over everything else.
