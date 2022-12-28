@@ -1868,10 +1868,10 @@ def process_content_galleries(
     for gallery in galleries:
         try:
             gallery = Gallery(content, gallery, profile_name=profile_name)
+            photo_galleries.append(gallery)
         except GalleryNotFound as e:
             logger.error(f"photos: {str(e)}")
 
-        photo_galleries.append(gallery)
     return photo_galleries
 
 
@@ -1989,14 +1989,21 @@ def replace_inline_contents(content, inline_contents):
             "content": content,
             "html_attributes": content_info.html_attributes,
         }
+
         profile = None
+
         if content_info.type == "gallery":
             template_values["default_template_name"] = pelican_settings[
                 "PHOTO_INLINE_GALLERY_TEMPLATE"
             ]
             template_values["galleries"] = image
             # We use the profile from the first gallery
-            profile = image[0].profile
+            if len(image) > 0:
+                profile = image[0].profile
+            else:
+                logger.warning(
+                    f"No gallery found for '{content_string}' in '{content.filename}'"
+                )
         elif content_info.type == "image":
             template_values["default_template_name"] = pelican_settings[
                 "PHOTO_INLINE_IMAGE_TEMPLATE"
@@ -2018,9 +2025,17 @@ def replace_inline_contents(content, inline_contents):
         elif isinstance(content, Page):
             template_values["page"] = content
 
-        content._content = content._content.replace(
-            content_string, profile.render_template(**template_values)
-        )
+        if profile:
+            content._content = content._content.replace(
+                content_string, profile.render_template(**template_values)
+            )
+        else:
+            logger.warning(
+                f"Unable to find profile for '{content_string}'"
+                f" in '{content.filename}'. Removing from output."
+                " Have a look for other errors or warnings to fix this issue."
+            )
+            content._content = content._content.replace(content_string, "")
 
 
 @measure_time
