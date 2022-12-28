@@ -8,6 +8,7 @@ import json
 import logging
 import mimetypes
 import multiprocessing
+import multiprocessing.pool
 import os
 import pprint
 import re
@@ -31,6 +32,7 @@ g_image_queue = []
 g_profiles = {}
 g_profiling_call_level = 0
 g_process_pool: Optional[multiprocessing.Pool] = None
+g_process_pool_initialized: bool = False
 g_image_cache: Dict[str, "Image"] = {}
 
 try:
@@ -1450,11 +1452,64 @@ class SourceImage:
         return source_image
 
 
+def destroy_process_pool():
+    global g_process_pool
+    global g_process_pool_initialized
+
+    if g_process_pool is not None:
+        logger.info("Send close command to process pool ...")
+        g_process_pool.close()
+        logger.info("Waiting for processes to finish  ...")
+        g_process_pool.join()
+        g_process_pool = None
+
+    g_process_pool_initialized = False
+
+
+def get_process_pool():
+    global g_process_pool
+    global g_process_pool_initialized
+
+    if g_process_pool_initialized:
+        return g_process_pool
+
+    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
+
+    if resize_job_number < 0:
+        resize_job_number = 1
+
+    if resize_job_number == 0:
+        resize_job_number = os.cpu_count() + 1
+
+    if g_process_pool is not None:
+        logger.debug(
+            f"Process pool in state {g_process_pool._state} and with"
+            f" {len(g_process_pool._pool)} worker(s) already exists"
+        )
+        if g_process_pool._state != multiprocessing.pool.RUN:
+            logger.warning("Existing pool is not in RUN state. Terminating pool.")
+            g_process_pool.terminate()
+            g_process_pool.join()
+            g_process_pool = None
+
+    if g_process_pool:
+        g_process_pool_initialized = True
+        return g_process_pool
+
+    if resize_job_number == 1:
+        logger.info("Process pool has been disabled, because we ony want 1 process")
+    else:
+        logger.info(f"Creating process pool with {resize_job_number} worker(s)")
+        g_process_pool = multiprocessing.Pool(processes=resize_job_number)
+
+    g_process_pool_initialized = True
+    return g_process_pool
+
+
 def initialized(pelican: Pelican):
     """Initialize the default settings"""
     global g_process_pool
     p = os.path.expanduser("~/Pictures")
-
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
     DEFAULT_CONFIG.setdefault("PHOTO_GALLERY", (1024, 768, 80))
     DEFAULT_CONFIG.setdefault("PHOTO_ARTICLE", (760, 506, 80))
@@ -1580,21 +1635,6 @@ def initialized(pelican: Pelican):
         if isinstance(profile_config, str):
             g_profiles[profile_name] = g_profiles[profile_config]
 
-    resize_job_number: int = pelican_settings["PHOTO_RESIZE_JOBS"]
-
-    if resize_job_number < 0:
-        resize_job_number = 1
-
-    if resize_job_number == 0:
-        resize_job_number = os.cpu_count() + 1
-
-    if resize_job_number == 1:
-        logger.info("Process pool has been disabled, because we ony want 1 process")
-        g_process_pool = None
-    else:
-        logger.info(f"Creating process pool with {resize_job_number} worker(s)")
-        g_process_pool = multiprocessing.Pool(processes=resize_job_number)
-
 
 @measure_time
 def enqueue_image(img: Image) -> Image:
@@ -1661,7 +1701,9 @@ def process_image_queue():
     results = {}
     image_queue = g_image_queue
     g_image_queue = []
-    if g_process_pool is None:
+
+    process_pool = get_process_pool()
+    if process_pool is None:
         for image in image_queue:
             result = image.process()
             if result:
@@ -1670,9 +1712,7 @@ def process_image_queue():
         results = dict(
             filter(
                 lambda v: v is not None,
-                g_process_pool.imap_unordered(
-                    process_image_process_wrapper, image_queue
-                ),
+                process_pool.imap_unordered(process_image_process_wrapper, image_queue),
             )
         )
 
@@ -2107,6 +2147,10 @@ def replace_inline_images(content, inline_images):
             )
 
 
+def handle_signal_finalized(pelican: Pelican):
+    destroy_process_pool()
+
+
 def handle_signal_generator_init(generator):
     global g_generator
     g_generator = generator
@@ -2182,3 +2226,4 @@ def register():
     signals.generator_init.connect(handle_signal_generator_init)
     signals.content_object_init.connect(handle_signal_content_object_init)
     signals.all_generators_finalized.connect(handle_signal_all_generators_finalized)
+    signals.finalized.connect(handle_signal_finalized)
