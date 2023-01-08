@@ -627,9 +627,8 @@ class Gallery:
                 continue
             if not os.path.isfile(os.path.join(dir_gallery, pic)):
                 continue
-            image_filenames.append(
-                f"{location_parsed['type']}{location_parsed['location']}/{pic}"
-            )
+            image_filename = os.path.join(location_parsed["location"], pic)
+            image_filenames.append(f"{location_parsed['type']}{image_filename}")
 
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
         self.images: List[GalleryImage] = []
@@ -975,6 +974,12 @@ class Image:
             "exif.rotate": self._operation_exif_rotate,
             "exif.manipulate": self._operation_manipulate_exif,
         }
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(source_image={self.source_image}, "
+            f"dst={self.dst} is_thumb={self.is_thumb})"
+        )
 
     def __str__(self):
         return self.web_filename
@@ -1414,6 +1419,12 @@ class SourceImage:
 
         #: Internal exclude list
         self._excluded = ExcludeList(source_image=self)
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(filename={self.filename},"
+            f" mimetype={self.mimetype}, type={self.type})"
+        )
 
     @property
     def caption(self) -> Optional[Caption]:
