@@ -913,6 +913,9 @@ class Image:
         if self.type == "gif":
             self.post_operations.append("main.convert_mode_p")
 
+        if self.type == "jpeg":
+            self.post_operations.append("main.convert_mode_rgb")
+
         skip_operations = self.spec.get("skip_operations")
         if isinstance(skip_operations, (list, tuple)):
             for item in self.pre_operations:
@@ -964,6 +967,7 @@ class Image:
         self.operation_mappings = {
             "main.convert": self._operation_convert,
             "main.convert_mode_p": self._operation_convert_mode_p,
+            "main.convert_mode_rgb": self._operation_convert_mode_rgb,
             "main.remove_alpha": self._operation_remove_alpha,
             "main.resize": self._operation_resize,
             "main.quantize": self._operation_quantize,
@@ -1187,10 +1191,18 @@ class Image:
         return image.convert(*args, **kwargs)
 
     @staticmethod
-    def _operation_convert_mode_p(img: PILImage.Image):
+    def _operation_convert_mode_p(img: PILImage.Image) -> PILImage.Image:
+        """Convert image into P mode if not already in this mode"""
         if img.mode == "P":
             return img
         return img.convert("P")
+
+    @staticmethod
+    def _operation_convert_mode_rgb(img: PILImage.Image) -> PILImage.Image:
+        """Convert image into RGB mode if not already in this mode"""
+        if img.mode == "RGB":
+            return img
+        return img.convert("RGB")
 
     @staticmethod
     def _operation_exif_rotate(
