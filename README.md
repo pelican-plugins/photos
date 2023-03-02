@@ -229,29 +229,10 @@ There are three corresponding template files.
 
 When the variable `PHOTO_INLINE_GALLERY_TEMPLATE` is set to true,
 a gallery could be placed everywhere in an article.
-An inline gallery is introduced in Markdown as:
+An inline gallery is introduced in Markdown or in reStructuredText as:
 
 ```
   gallery::{photo}mygallery
-```
-
-The `PHOTO_INLINE_GALLERY_PATTERN` variable allows change the
-pattern used to recognize an inline gallery in an article.
-The default corresponds to:
-
-```python
-  PHOTO_INLINE_GALLERY_PATTERN = r"gallery::(?P<gallery_name>[/{}\w_-]+)"
-```
-
-It could be changed e.g. as
-```python
-  PHOTO_INLINE_GALLERY_PATTERN = r"..[ \t]+gallery=(?P<gallery_name>[/{}\w_-]+)"
-```
-
-and then, an inlined gallery could be introduced in reStructuredText as:
-
-```
-..  gallery={photo}mygallery
 ```
 
 The template file to render inline galleries is loaded.
