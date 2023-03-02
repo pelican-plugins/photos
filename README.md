@@ -285,6 +285,7 @@ and could be customized. The substituted variables are:
   * `gallery_name` : the title of the gallery
   * `image_source` : the output path to the original photo
   * `image_article` : the output path to the generated photo
+  * `exif` : the EXIF information of the photo, as read from the file `exif.txt`
   * `caption` : the caption of the photo, as read from `captions.txt`
   * `tag` : the tag, e.g. `img`
   * `src` : the source keyword, e.g. `src`

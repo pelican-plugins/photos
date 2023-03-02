@@ -2178,6 +2178,7 @@ def replace_inline_images(content, inline_images):
                 template_values["caption"] = str(image.caption)
             else:
                 template_values["caption"] = ""
+            template_values["exif"] = image.image.exif
             gallery_name = value.split("/")[0]
             template_values["gallery_name"] = gallery_name
             template_values["tag"] = m.group("tag")
