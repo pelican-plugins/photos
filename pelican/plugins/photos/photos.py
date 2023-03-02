@@ -627,8 +627,9 @@ class Gallery:
                 continue
             if not os.path.isfile(os.path.join(dir_gallery, pic)):
                 continue
-            image_filename = os.path.join(location_parsed["location"], pic)
-            image_filenames.append(f"{location_parsed['type']}{image_filename}")
+            image_filenames.append(
+                f"{location_parsed['type']}{location_parsed['location']}/{pic}"
+            )
 
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
         self.images: List[GalleryImage] = []
@@ -912,9 +913,6 @@ class Image:
         if self.type == "gif":
             self.post_operations.append("main.convert_mode_p")
 
-        if self.type == "jpeg":
-            self.post_operations.append("main.convert_mode_rgb")
-
         skip_operations = self.spec.get("skip_operations")
         if isinstance(skip_operations, (list, tuple)):
             for item in self.pre_operations:
@@ -966,7 +964,6 @@ class Image:
         self.operation_mappings = {
             "main.convert": self._operation_convert,
             "main.convert_mode_p": self._operation_convert_mode_p,
-            "main.convert_mode_rgb": self._operation_convert_mode_rgb,
             "main.remove_alpha": self._operation_remove_alpha,
             "main.resize": self._operation_resize,
             "main.quantize": self._operation_quantize,
@@ -978,12 +975,6 @@ class Image:
             "exif.rotate": self._operation_exif_rotate,
             "exif.manipulate": self._operation_manipulate_exif,
         }
-
-    def __repr__(self):
-        return (
-            f"{self.__class__.__name__}(source_image={self.source_image}, "
-            f"dst={self.dst} is_thumb={self.is_thumb})"
-        )
 
     def __str__(self):
         return self.web_filename
@@ -1196,18 +1187,10 @@ class Image:
         return image.convert(*args, **kwargs)
 
     @staticmethod
-    def _operation_convert_mode_p(img: PILImage.Image) -> PILImage.Image:
-        """Convert image into P mode if not already in this mode"""
+    def _operation_convert_mode_p(img: PILImage.Image):
         if img.mode == "P":
             return img
         return img.convert("P")
-
-    @staticmethod
-    def _operation_convert_mode_rgb(img: PILImage.Image) -> PILImage.Image:
-        """Convert image into RGB mode if not already in this mode"""
-        if img.mode == "RGB":
-            return img
-        return img.convert("RGB")
 
     @staticmethod
     def _operation_exif_rotate(
@@ -1431,12 +1414,6 @@ class SourceImage:
 
         #: Internal exclude list
         self._excluded = ExcludeList(source_image=self)
-
-    def __repr__(self):
-        return (
-            f"{self.__class__.__name__}(filename={self.filename},"
-            f" mimetype={self.mimetype}, type={self.type})"
-        )
 
     @property
     def caption(self) -> Optional[Caption]:
@@ -2067,8 +2044,14 @@ def replace_inline_galleries(content, inline_galleries):
         template = g_generator.get_template(
             pelican_settings["PHOTO_INLINE_GALLERY_TEMPLATE"]
         )
+        relative_urls = pelican_settings["RELATIVE_URLS"]
+        if relative_urls:
+            siteurl = "."
+        else:
+            siteurl = pelican_settings["SITEURL"]
         template_values = {
             "galleries": galleries,
+            "SITEURL": siteurl,
         }
         if isinstance(content, Article):
             template_values["article"] = content
@@ -2085,7 +2068,6 @@ def replace_inline_images(content, inline_images):
     for image_string, image_info in inline_images.items():
         m = image_info["match"]
         image = image_info["image"]
-        parsed_attrs = image_info.get("parsed_attrs")
         profile = image.profile
 
         what = m.group("what")
@@ -2103,85 +2085,108 @@ def replace_inline_images(content, inline_images):
                     prof_attr_name, prof_attr_value.format(i=image)
                 )
 
-        if profile.has_template:
-            content._content = content._content.replace(
-                image_string,
-                profile.render_template(
-                    content=content,
-                    image=image,
-                    match=m,
-                    parsed_attrs=dict(parsed_attrs),
-                ),
-            )
+        relative_urls = pelican_settings["RELATIVE_URLS"]
+        if relative_urls:
+            siteurl = "."
+        else:
+            siteurl = pelican_settings["SITEURL"]
 
-        elif what == "photo":
-            content._content = content._content.replace(
-                image_string,
-                "".join(
-                    (
-                        "<",
-                        m.group("tag"),
-                        m.group("attrs_before"),
-                        m.group("src"),
-                        "=",
-                        m.group("quote"),
-                        "{siteurl}/{filename}".format(
-                            siteurl=pelican_settings["SITEURL"],
-                            filename=image.image.web_filename,
-                        ),
-                        m.group("quote"),
-                        extra_attributes,
-                        m.group("attrs_after"),
-                    )
-                ),
-            )
+        if what == "photo":
+            template_file_name = pelican_settings["PHOTO_INLINE_IMAGE_TEMPLATE"]
+        else:
+            template_file_name = pelican_settings["PHOTO_INLINE_LIGHTBOX_TEMPLATE"]
+        try:
+            template = g_generator.get_template(template_file_name)
+        except Exception:
+            template = None
 
-        elif what == "lightbox" and tag == "img":
-            lightbox_attr_list = [""]
-
-            gallery_name = value.split("/")[0]
-            lightbox_attr_list.append(
-                '{}="{}"'.format(
-                    pelican_settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name
+        if template is None:
+            # no template file: use a defaut hard-coded rendering
+            if what == "photo":
+                content._content = content._content.replace(
+                    image_string,
+                    "".join(
+                        (
+                            "<",
+                            m.group("tag"),
+                            m.group("attrs_before"),
+                            m.group("src"),
+                            "=",
+                            m.group("quote"),
+                            "{siteurl}/{filename}".format(
+                                siteurl=siteurl,
+                                filename=image.image.web_filename,
+                            ),
+                            m.group("quote"),
+                            extra_attributes,
+                            m.group("attrs_after"),
+                        )
+                    ),
                 )
-            )
-
-            if image.caption:
+            elif what == "lightbox" and tag == "img":
+                lightbox_attr_list = [""]
+                gallery_name = value.split("/")[0]
                 lightbox_attr_list.append(
                     '{}="{}"'.format(
-                        pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"],
-                        str(image.caption),
+                        pelican_settings["PHOTO_LIGHTBOX_GALLERY_ATTR"], gallery_name
                     )
                 )
-
-            lightbox_attrs = " ".join(lightbox_attr_list)
-
-            content._content = content._content.replace(
-                image_string,
-                "".join(
-                    (
-                        "<a href=",
-                        m.group("quote"),
-                        "{siteurl}/{filename}".format(
-                            siteurl=pelican_settings["SITEURL"],
-                            filename=image.image.web_filename,
-                        ),
-                        m.group("quote"),
-                        lightbox_attrs,
-                        "><img",
-                        m.group("attrs_before"),
-                        "src=",
-                        m.group("quote"),
-                        "{siteurl}/{filename}".format(
-                            siteurl=pelican_settings["SITEURL"],
-                            filename=image.thumb.web_filename,
-                        ),
-                        m.group("quote"),
-                        extra_attributes,
-                        m.group("attrs_after"),
-                        "</a>",
+                if image.caption:
+                    lightbox_attr_list.append(
+                        '{}="{}"'.format(
+                            pelican_settings["PHOTO_LIGHTBOX_CAPTION_ATTR"],
+                            str(image.caption),
+                        )
                     )
-                ),
+                lightbox_attrs = " ".join(lightbox_attr_list)
+                content._content = content._content.replace(
+                    image_string,
+                    "".join(
+                        (
+                            "<a href=",
+                            m.group("quote"),
+                            "{siteurl}/{filename}".format(
+                                siteurl=siteurl,
+                                filename=image.image.web_filename,
+                            ),
+                            m.group("quote"),
+                            lightbox_attrs,
+                            "><img",
+                            m.group("attrs_before"),
+                            "src=",
+                            m.group("quote"),
+                            "{siteurl}/{filename}".format(
+                                siteurl=siteurl,
+                                filename=image.thumb.web_filename,
+                            ),
+                            m.group("quote"),
+                            extra_attributes,
+                            m.group("attrs_after"),
+                            "</a>",
+                        )
+                    ),
+                )
+        else:
+            # have an optional template file,
+            # e.g. inline_image.html or inline_lightbox.html
+            template_values = {"SITEURL": siteurl}
+            template_values["image_source"] = "photos/" + image.filename
+            template_values["image_article"] = image.image.web_filename
+            if what == "lightbox":
+                template_values["image_thumb"] = image.thumb.web_filename
+            if image.caption:
+                template_values["caption"] = str(image.caption)
+            else:
+                template_values["caption"] = ""
+            gallery_name = value.split("/")[0]
+            template_values["gallery_name"] = gallery_name
+            template_values["tag"] = m.group("tag")
+            template_values["src"] = m.group("src")
+            template_values["attributes_before"] = m.group("attrs_before")
+            template_values["attributes_after"] = m.group("attrs_after")
+            template_values["extra_attributes"] = extra_attributes
+            content._content = content._content.replace(
+                image_string, template.render(**template_values)
             )
 
 

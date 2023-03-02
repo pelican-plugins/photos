@@ -78,6 +78,7 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 
 `PHOTO_INLINE_GALLERY_ENABLED`
 : Enable inline gallery processing. (Default: False)
+With this feature, a gallery could be placed everywhere in an article.
 
 `PHOTO_INLINE_GALLERY_PATTERN`
 : The pattern to look for. The ```gallery_name``` is used to find the right gallery.
@@ -219,6 +220,133 @@ For example, add the following to the template `index.html`, inside the `entry-c
 	style="display: inline; float: right; margin: 2px 0 2ex 4ex;" /></a>
 {% endif %}
 ```
+
+## The new optional templates files for inline galleries, images and lightboxes
+
+There are three corresponding template files.
+
+### Inline gallery
+
+When the variable `PHOTO_INLINE_GALLERY_TEMPLATE` is set to true,
+a gallery could be placed everywhere in an article.
+An inline gallery is introduced in Markdown as:
+
+```
+  gallery::{photo}mygallery
+```
+
+The `PHOTO_INLINE_GALLERY_PATTERN` variable allows change the
+pattern used to recognize an inline gallery in an article.
+The default corresponds to:
+
+```python
+  PHOTO_INLINE_GALLERY_PATTERN = r"gallery::(?P<gallery_name>[/{}\w_-]+)"
+```
+
+It could be changed e.g. as
+```python
+  PHOTO_INLINE_GALLERY_PATTERN = r"..[ \t]+gallery=(?P<gallery_name>[/{}\w_-]+)"
+```
+
+and then, an inlined gallery could be introduced in reStructuredText as:
+
+```
+..  gallery={photo}mygallery
+```
+
+The template file to render inline galleries is loaded.
+The name of this file is by default ``"inline_gallery.html"```
+and could be changed with the  `PHOTO_INLINE_GALLERY_TEMPLATE`  variable.
+The substituted variable is `gallery` which is the previous tuple with five elements.
+An example of this file is:
+```html
+<div class="gallery">
+    {% for title, gallery in galleries%}
+        <h1>{{ title }}</h1>
+            {% for name, photo, thumb, exif, caption in gallery %}
+                    <a href="{{ SITEURL }}/{{ photo }}" title="{{ name }}" exif="{{ exif }}" caption="{{ caption }}"><img src="{{ SITEURL }}/{{ thumb }}"></a>
+            {% endfor %}
+    {% endfor %}
+</div>
+```
+
+### Inline image
+
+An inlined image is introduced in Markdown as:
+
+```
+  ![alttext]({image}mygallery/myimage.jpg){height=1.2em}
+```
+
+or in reStructuredText as:
+
+```
+  .. |mylabel| image:: {photo}mygallery/myimage.jpg
+            :height: 1.2em
+
+  And then, it could be inserted |mylabel| everywhere in the text.
+```
+
+Inlined images are rendered by default using an internal template scheme.
+This could be customized by providing a template file.
+The name of this file is by default ``"inline_image.html"```
+and could be changed with the  `PHOTO_INLINE_IMAGE_TEMPLATE`  variable.
+When this file is founded, it replaces the default internal template.
+An example of this file is:
+```html
+  <{{ tag }} {{ attributes_before }} {{ src }}="{{ SITEURL }}/{{ image_article }}" {{ attributes_after }}
+```
+The content of this example file corresponds exactly to the internal default behavior
+and could be customized. The substituted variables are:
+
+  * `SITEURL` : the propagated variable from `pelicanconf.py` or ``"."``
+     when `RELATIVE_URLS` is set to `True`.
+  * `gallery_name` : the title of the gallery
+  * `image_source` : the output path to the original photo
+  * `image_article` : the output path to the generated photo
+  * `caption` : the caption of the photo, as read from `captions.txt`
+  * `tag` : the tag, e.g. `img`
+  * `src` : the source keyword, e.g. `src`
+  * `attributes_before` : attribute list that comes before the `src`
+  * `attributes_after` : attribute list that comes after the `src`
+  * `extra_attributes` : others attributes
+
+### Inline lightbox
+
+Similarly to inlined images, an inlined lightbox is introduced in Markdown as:
+
+```
+  ![alttext]({lightbox}mygallery/myimage.jpg){width=15%}
+```
+
+or in reStructuredText as:
+
+```
+  .. |mylabel| image:: {lightbox}mygallery/myimage.jpg
+            :width: 15%
+
+  And then, it could be inserted as:
+
+  |mylabel|
+```
+
+Inlined lighboxes are also rendered by default using an internal template scheme
+and this could be customized by providing a template file.
+The name of this file is by default ``"inline_lighbox.html"```
+and could be changed with the  `PHOTO_INLINE_LIGHTBOX_TEMPLATE`  variable.
+When this file is founded, it replaces the default internal template.
+An example of this file is:
+```html
+<a href="{{ SITEURL }}/{{ image_source }}" data-lightbox="{{ gallery_name}}" data-title="{{ caption}}">
+  <{{ tag }} {{ attributes_before }} {{ src }}="{{ SITEURL }}/{{ image_thumb }}" {{ attributes_after }}
+</a>
+```
+
+The content of this example file corresponds exactly to the internal default behavior
+and could be customized. The substituted variables are the same as for the
+inlined images, with, in addition:
+
+  * `image_gthumb` : the output path to the generated thumbnail.
 
 ## How to make the gallery lightbox
 
