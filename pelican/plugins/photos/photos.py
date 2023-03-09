@@ -588,6 +588,7 @@ class Gallery:
         location_parsed,
         profile_name: Optional[str] = None,
         profile: Optional[Profile] = None,
+        options: Optional[dict] = {},
     ):
         self.content = content
 
@@ -630,6 +631,8 @@ class Gallery:
             image_filenames.append(
                 f"{location_parsed['type']}{location_parsed['location']}/{pic}"
             )
+
+        self.options = options
 
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
         self.images: List[GalleryImage] = []
@@ -1582,7 +1585,8 @@ def initialized(pelican: Pelican):
         pelican.settings.setdefault("PHOTO_INLINE_PARSE_HTML", True)
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_ENABLED", False)
         pelican.settings.setdefault(
-            "PHOTO_INLINE_GALLERY_PATTERN", r"gallery::(?P<gallery_name>[/{}\w_-]+)"
+            "PHOTO_INLINE_GALLERY_PATTERN",
+            r"gallery(\[(?P<options>[\w,=]+)\])?::(?P<gallery_name>[/{}\w_-]+)",
         )
         pelican.settings.setdefault("PHOTO_INLINE_GALLERY_TEMPLATE", "inline_gallery")
         pelican.settings.setdefault("PHOTO_INLINE_IMAGE_TEMPLATE", "inline_image")
@@ -1853,6 +1857,7 @@ def process_content_galleries(
     content: Union[Article, Page],
     location,
     profile_name: Optional[str] = None,
+    options: Optional[dict] = {},
 ) -> List[Gallery]:
     """
     Process all galleries attached to an article or page.
@@ -1860,6 +1865,7 @@ def process_content_galleries(
     :param content: The content object
     :param location: Galleries
     :param profile_name:
+    :param options: a dict of <key> and <value>
     """
     photo_galleries = []
 
@@ -1867,7 +1873,9 @@ def process_content_galleries(
 
     for gallery in galleries:
         try:
-            gallery = Gallery(content, gallery, profile_name=profile_name)
+            gallery = Gallery(
+                content, gallery, profile_name=profile_name, options=options
+            )
             photo_galleries.append(gallery)
         except GalleryNotFound as e:
             logger.error(f"photos: {str(e)}")
@@ -1884,8 +1892,35 @@ def detect_inline_galleries(content: Union[Article, Page]):
             pelican_settings["PHOTO_INLINE_GALLERY_PATTERN"], content._content
         )
         for m in gallery_strings:
+            gallery_name = m.group("gallery_name")
+            options_strg = m.group("options")
+            options = {}
+            if options_strg is not None:
+                options_list = re.compile(r"[\^,]+").split(options_strg)
+                r_pair = re.compile(r"(?P<variable>\w+)=(?P<value>\w+)")
+                r_flag = re.compile(r"(?P<flag>\w+)")
+                for opt in options_list:
+                    m_pair = r_pair.match(opt)
+                    m_flag = r_flag.match(opt)
+                    if m_pair:
+                        d = m_pair.groupdict()
+                        value = d["value"]
+                        # convert string to bool when possible
+                        if value == "True":
+                            value = True
+                        elif value == "False":
+                            value = False
+                        options[d["variable"]] = value
+                    elif m_flag:
+                        d = m_flag.groupdict()
+                        options[d["flag"]] = True
+                    else:
+                        logger.error(
+                            f"unexpected inline gallery <options> = {options_strg}"
+                        )
+
             inline_galleries[str(m.group())] = process_content_galleries(
-                content, m.group("gallery_name")
+                content=content, location=gallery_name, options=options
             )
 
     return inline_galleries
@@ -2049,8 +2084,11 @@ def replace_inline_galleries(content, inline_galleries):
             siteurl = "."
         else:
             siteurl = pelican_settings["SITEURL"]
+
+        options = galleries[0].options
         template_values = {
             "galleries": galleries,
+            "options": options,
             "SITEURL": siteurl,
         }
         if isinstance(content, Article):

@@ -81,12 +81,14 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 With this feature, a gallery could be placed everywhere in an article.
 
 `PHOTO_INLINE_GALLERY_PATTERN`
-: The pattern to look for. The ```gallery_name``` is used to find the right gallery.
+: The pattern to look for. The ```gallery_name``` is used to find the right gallery
+and the optional ``options`` is used to transmit options to the ``inline_gallery.html``
+template file.
 
 Defaults:
 
 ```python
-r"gallery::(?P<gallery_name>[/{}\w_-]+)"
+r"gallery(\[(?P<options>[\w,=]+)\])?::(?P<gallery_name>[/{}\w_-]+)"
 ```
 
 `PHOTO_INLINE_GALLERY_TEMPLATE`
@@ -250,6 +252,53 @@ An example of this file is:
     {% endfor %}
 </div>
 ```
+
+The `PHOTO_INLINE_GALLERY_PATTERN`
+variable in the ``pelicanconf.py`` file defined the pattern to look for both the
+```gallery_name``` and the ``options``, used to transmit options
+to the ``inline_gallery.html`.
+Its default value is
+
+```python
+r"gallery(\[(?P<options>[\w,=]+)\])?::(?P<gallery_name>[/{}\w_-]+)"
+```
+An inline gallery transmitting an option
+is introduced in Markdown or in reStructuredText as:
+
+```
+  gallery[reverse]::{photo}mygallery
+```
+
+The ``"inline_gallery.html"``` template file is then modified
+accordingly to take into accound this option:
+
+```html
+<div class="gallery">
+    {% if options and options['reverse'] %}
+      {% set use_reverse = True %}
+    {% else %}
+      {% set use_reverse = False %}
+    {% endif %}
+    {% for title, gallery in galleries%}
+        <h1>{{ title }}</h1>
+            {% for name, photo, thumb, exif, caption in (gallery | sort(reverse=use_reverse,attribute="filename")) %}
+                    <a href="{{ SITEURL }}/{{ photo }}" title="{{ name }}" exif="{{ exif }}" caption="{{ caption }}"><img src="{{ SITEURL }}/{{ thumb }}"></a>
+            {% endfor %}
+    {% endfor %}
+</div>
+```
+
+The ``options`` variable is a python ``dict``:
+it it is defined as a coma-separated list of ``keys``
+and ``value`` pairs, e.g.
+
+```
+  gallery[reverse,width=20em]::{photo}mygallery
+```
+
+When there is no explicit value, the value is a ``bool``, set to ``True``.
+When the value is explicitely ``False``, it is also converted to ``bool``,
+otherwise it is left as a ``string``.
 
 ### Inline image
 
