@@ -1,7 +1,7 @@
 Photos: A Plugin for Pelican
 ============================
 
-[![Build Status](https://img.shields.io/github/workflow/status/pelican-plugins/photos/build)](https://github.com/pelican-plugins/photos/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/pelican-plugins/photos/main.yml?branch=main)](https://github.com/pelican-plugins/photos/actions)
 [![PyPI Version](https://img.shields.io/pypi/v/pelican-photos)](https://pypi.org/project/pelican-photos/)
 ![License](https://img.shields.io/pypi/l/pelican-photos?color=blue)
 
