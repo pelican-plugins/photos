@@ -50,7 +50,7 @@ The plug-in resizes the referred photos, and generates thumbnails for galleries 
 : Adds a watermark to all photos in articles and pages. Defaults to using your site name.
 
 `PHOTO_WATERMARK_TEXT' = SITENAME`
-: Allow the user to change the watermark text or remove it completely. By default it uses [SourceCodePro-Bold](http://www.adobe.com/products/type/font-information/source-code-pro-readme.html) as the font.
+: Allow the user to change the watermark text or remove it completely. By default it uses [SourceCodePro-Bold](https://github.com/adobe-fonts/source-code-pro) as the font.
 
 `PHOTO_WATERMARK_IMG = ''`
 : Allows the user to add an image in addition to or as the only watermark. Set the variable to the location.
