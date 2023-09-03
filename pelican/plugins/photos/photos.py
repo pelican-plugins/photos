@@ -950,9 +950,9 @@ class Image:
                 operation_args = operation[1]
 
             if operation_name == "main.resize" and not operation_args:
-                operation_args["resample"] = PILImage.ANTIALIAS
+                operation_args["resample"] = PILImage.LANCZOS
             if operation_name == "ops.fit" and not operation_args:
-                operation_args["method"] = PILImage.ANTIALIAS
+                operation_args["method"] = PILImage.LANCZOS
             if (
                 operation_name in ("main.resize", "ops.fit")
                 and "size" not in operation_args
@@ -1051,7 +1051,7 @@ class Image:
                 image: PILImage.Image = PILImage.open(self.output_filename)
 
             if self._pelican_settings["PHOTO_RESULT_IMAGE_AVERAGE_COLOR"]:
-                image2: PILImage.Image = image.resize((1, 1), PILImage.ANTIALIAS)
+                image2: PILImage.Image = image.resize((1, 1), PILImage.LANCZOS)
                 # We need RGB to get red, green and blue values for the pixel
                 self._average_color = image2.convert("RGB").getpixel((0, 0))
 
