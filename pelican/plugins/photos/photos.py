@@ -1534,9 +1534,24 @@ def initialized(pelican: Pelican):
     global g_process_pool
     p = os.path.expanduser("~/Pictures")
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
-    DEFAULT_CONFIG.setdefault("PHOTO_GALLERY", (1024, 768, 80))
-    DEFAULT_CONFIG.setdefault("PHOTO_ARTICLE", (760, 506, 80))
-    DEFAULT_CONFIG.setdefault("PHOTO_THUMB", (192, 144, 60))
+    DEFAULT_CONFIG.setdefault("PHOTO_GALLERY", {
+        "width": 1024,
+        "height": 768,
+        "type": "jpeg",
+        "options": {"quality": 80},
+    })
+    DEFAULT_CONFIG.setdefault("PHOTO_ARTICLE", {
+        "width": 760,
+        "height": 506,
+        "type": "jpeg",
+        "options": {"quality": 80},
+    })
+    DEFAULT_CONFIG.setdefault("PHOTO_THUMB", {
+        "width": 192,
+        "height": 144,
+        "type": "jpeg",
+        "options": {"quality": 60},
+    })
     DEFAULT_CONFIG.setdefault("PHOTO_SQUARE_THUMB", False)
     DEFAULT_CONFIG.setdefault("PHOTO_GALLERY_TITLE", "")
     DEFAULT_CONFIG.setdefault("PHOTO_ALPHA_BACKGROUND_COLOR", (255, 255, 255))
