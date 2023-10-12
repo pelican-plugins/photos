@@ -1537,28 +1537,34 @@ def initialized(pelican: Pelican):
     DEFAULT_CONFIG.setdefault(
         "PHOTO_GALLERY",
         {
-            "width": 1024,
-            "height": 768,
-            "type": "jpeg",
-            "options": {"quality": 80},
+            "default": {
+                "width": 1024,
+                "height": 768,
+                "type": "jpeg",
+                "options": {"quality": 80},
+            }
         },
     )
     DEFAULT_CONFIG.setdefault(
         "PHOTO_ARTICLE",
         {
-            "width": 760,
-            "height": 506,
-            "type": "jpeg",
-            "options": {"quality": 80},
+            "default": {
+                "width": 760,
+                "height": 506,
+                "type": "jpeg",
+                "options": {"quality": 80},
+            }
         },
     )
     DEFAULT_CONFIG.setdefault(
         "PHOTO_THUMB",
         {
-            "width": 192,
-            "height": 144,
-            "type": "jpeg",
-            "options": {"quality": 60},
+            "default": {
+                "width": 192,
+                "height": 144,
+                "type": "jpeg",
+                "options": {"quality": 60},
+            }
         },
     )
     DEFAULT_CONFIG.setdefault("PHOTO_SQUARE_THUMB", False)
@@ -1581,6 +1587,39 @@ def initialized(pelican: Pelican):
 
     if pelican:
         pelican.settings.setdefault("PHOTO_LIBRARY", p)
+        pelican.settings.setdefault(
+            "PHOTO_GALLERY",
+            {
+                "default": {
+                    "width": 1024,
+                    "height": 768,
+                    "type": "jpeg",
+                    "options": {"quality": 80},
+                }
+            },
+        )
+        pelican.settings.setdefault(
+            "PHOTO_ARTICLE",
+            {
+                "default": {
+                    "width": 760,
+                    "height": 506,
+                    "type": "jpeg",
+                    "options": {"quality": 80},
+                }
+            },
+        )
+        pelican.settings.setdefault(
+            "PHOTO_THUMB",
+            {
+                "default": {
+                    "width": 192,
+                    "height": 144,
+                    "type": "jpeg",
+                    "options": {"quality": 60},
+                }
+            },
+        )
         pelican.settings.setdefault("PHOTO_GALLERY", (1024, 768, 80))
         pelican.settings.setdefault("PHOTO_ARTICLE", (760, 506, 80))
         pelican.settings.setdefault("PHOTO_THUMB", (192, 144, 60))
