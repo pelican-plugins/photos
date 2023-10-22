@@ -282,7 +282,7 @@ def get_image_from_string(
 
 def get_site_url():
     relative_urls = pelican_settings["RELATIVE_URLS"]
-    
+
     if relative_urls:
         siteurl = "."
     else:
@@ -1394,7 +1394,7 @@ class ImageSrcSet(list):
         for img in self:
             items.append(
                 "{siteurl}/{filename} {descriptor}".format(
-                    siteurl=pelican_settings["SITEURL"],
+                    siteurl=get_site_url(),
                     filename=img.web_filename,
                     descriptor=img.descriptor,
                 )
@@ -2135,7 +2135,7 @@ def replace_inline_images(content, inline_images):
                         "=",
                         m.group("quote"),
                         "{siteurl}/{filename}".format(
-                            siteurl=pelican_settings["SITEURL"],
+                            siteurl=get_site_url(),
                             filename=image.image.web_filename,
                         ),
                         m.group("quote"),
@@ -2172,7 +2172,7 @@ def replace_inline_images(content, inline_images):
                         "<a href=",
                         m.group("quote"),
                         "{siteurl}/{filename}".format(
-                            siteurl=pelican_settings["SITEURL"],
+                            siteurl=get_site_url(),
                             filename=image.image.web_filename,
                         ),
                         m.group("quote"),
@@ -2182,7 +2182,7 @@ def replace_inline_images(content, inline_images):
                         "src=",
                         m.group("quote"),
                         "{siteurl}/{filename}".format(
-                            siteurl=pelican_settings["SITEURL"],
+                            siteurl=get_site_url(),
                             filename=image.thumb.web_filename,
                         ),
                         m.group("quote"),
