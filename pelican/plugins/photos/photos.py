@@ -280,6 +280,7 @@ def get_image_from_string(
 
     return image_class(filename=url.path, **kwargs)
 
+
 def get_site_url():
     relative_urls = pelican_settings["RELATIVE_URLS"]
 
@@ -289,6 +290,7 @@ def get_site_url():
         siteurl = pelican_settings["SITEURL"]
 
     return siteurl
+
 
 class BaseNoteCache:
     note_cache: Dict[str, "BaseNoteCache"] = {}
