@@ -28,7 +28,7 @@ class TestPhotos(unittest.TestCase):
         photos.initialized(cls)
 
         context = cls.settings.copy()
-        context["generated_content"] = dict()
+        context["generated_content"] = {}
         context["static_links"] = set()
         context["static_content"] = {}
         cls.generator = ArticlesGenerator(
@@ -71,7 +71,7 @@ class TestPhotos(unittest.TestCase):
 
     def test_photo_article_image(self):
         self.assertEqual(
-            [v for v in self.get_article("photo").photo_image],
+            list(self.get_article("photo").photo_image),
             ["best.jpg", "photos/agallery/besta.jpg", "photos/agallery/bestt.jpg"],
         )
 
@@ -110,7 +110,7 @@ class TestPhotos(unittest.TestCase):
     def test_filename_article_image(self):
         self.assertEqual(
             ["best.jpg", "photos/agallery/besta.jpg", "photos/agallery/bestt.jpg"],
-            [v for v in self.get_article("filename").photo_image],
+            list(self.get_article("filename").photo_image),
         )
 
     def test_filename_article_gallery(self):

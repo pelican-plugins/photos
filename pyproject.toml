@@ -99,7 +99,7 @@ ignore = [
   "RUF100",  # unused blanket `NOQA` directive
 ]
 
-target-version = "py312"
+target-version = "py38"
 
 [tool.ruff.isort]
 combine-as-imports = true

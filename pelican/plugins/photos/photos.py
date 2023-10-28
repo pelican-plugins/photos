@@ -44,9 +44,9 @@ try:
         ImageFont,
         ImageOps,
     )
-except ImportError as e:
+except ImportError:
     logger.error("PIL/Pillow not found")
-    raise e
+    raise
 
 EXIF_TAGS_NAME_CODE = {v: n for n, v in ExifTags.TAGS.items()}
 
@@ -234,7 +234,7 @@ def measure_time(func):
 
 @measure_time
 def find_profile(names: list[str], default_not_found=True):
-    """Find first matching profile"""
+    """Find first matching profile."""
     for name in names:
         try:
             return get_profile(name)
@@ -247,7 +247,7 @@ def find_profile(names: list[str], default_not_found=True):
 
 
 def get_profile(name: str) -> Profile:
-    """Return the profile"""
+    """Return the profile."""
     profile = g_profiles.get(name)
     if profile is None:
         raise ProfileNotFound(f"Unable to find profile '{name}'")
@@ -431,11 +431,11 @@ class BaseImage:
                 profile_name = "default"
             try:
                 self.profile = get_profile(profile_name)
-            except ProfileNotFound as e:
+            except ProfileNotFound:
                 logger.error(
                     f"Unable to find profile '{profile_name}' for image '{filename}'"
                 )
-                raise e
+                raise
 
 
 class ArticleImage(BaseImage):
@@ -493,8 +493,7 @@ class ArticleImage(BaseImage):
         self.thumb = enqueue_image(img)
 
     def __getitem__(self, index):
-        """Legacy support
-        """
+        """Legacy support."""
         if index == 0:
             return self.file
         elif index == 1:
@@ -577,7 +576,7 @@ class ContentImageLightbox(BaseImage):
 
 
 class Gallery:
-    """Process a single gallery
+    """Process a single gallery.
 
     - look for images
     - read meta data
@@ -661,9 +660,7 @@ class Gallery:
 
 
 class GalleryImage(BaseImage):
-    """Image of a gallery
-
-    """
+    """Image of a gallery."""
 
     def __init__(
         self,
@@ -713,8 +710,7 @@ class GalleryImage(BaseImage):
         self.thumb = enqueue_image(img)
 
     def __getitem__(self, item):
-        """Legacy support
-        """
+        """Legacy support."""
         if item == 0:
             return self.file
         elif item == 1:
@@ -742,7 +738,7 @@ class GalleryImage(BaseImage):
 
     @property
     def is_excluded(self) -> bool:
-        """Is the image is excluded from the gallery"""
+        """Is the image is excluded from the gallery."""
         return self.image.is_excluded
 
 
@@ -990,7 +986,7 @@ class Image:
 
     @property
     def average_color(self) -> Optional[str]:
-        """Average color"""
+        """Average color."""
         if self._average_color is None:
             self._load_result_info()
         if self._average_color:
@@ -1000,7 +996,7 @@ class Image:
 
     @property
     def caption(self) -> Optional[Caption]:
-        """Caption of the image"""
+        """Caption of the image."""
         return self.source_image.caption
 
     @property
@@ -1018,34 +1014,31 @@ class Image:
 
     @property
     def is_excluded(self) -> bool:
-        """Is the image on the exclude-list"""
+        """Is the image on the exclude-list."""
         return self.source_image.is_excluded
 
     @staticmethod
     def is_alpha(img: PILImage.Image) -> bool:
         return (
-            True
-            if img.mode in ("RGBA", "LA")
-            or (img.mode == "P" and "transparency" in img.info)
-            else False
+            bool(img.mode in ("RGBA", "LA") or img.mode == "P" and "transparency" in img.info)
         )
 
     @property
     def height(self) -> int:
-        """Height of the image"""
+        """Height of the image."""
         if self._height is None:
             self._load_result_info()
         return self._height
 
     @property
     def width(self) -> int:
-        """Width of the image"""
+        """Width of the image."""
         if self._width is None:
             self._load_result_info()
         return self._width
 
     def _load_result_info(self, image: Optional[PILImage.Image] = None):
-        """Load the information from the result image"""
+        """Load the information from the result image."""
         if not self._result_info_loaded:
             if image is None:
                 image: PILImage.Image = PILImage.open(self.output_filename)
@@ -1074,7 +1067,7 @@ class Image:
         self._result_info_loaded = True
 
     def process(self) -> tuple[str, dict[str, Any]]:
-        """Process the image"""
+        """Process the image."""
         process = multiprocessing.current_process()
         logger.info(
             f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
@@ -1180,10 +1173,7 @@ class Image:
         Taken from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/362879
         """
         assert opacity >= 0 and opacity <= 1
-        if self.is_alpha(im):
-            im = im.copy()
-        else:
-            im = im.convert("RGBA")
+        im = im.copy() if self.is_alpha(im) else im.convert("RGBA")
 
         alpha = im.split()[3]
         alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
@@ -1196,14 +1186,14 @@ class Image:
 
     @staticmethod
     def _operation_convert_mode_p(img: PILImage.Image) -> PILImage.Image:
-        """Convert image into P mode if not already in this mode"""
+        """Convert image into P mode if not already in this mode."""
         if img.mode == "P":
             return img
         return img.convert("P")
 
     @staticmethod
     def _operation_convert_mode_rgb(img: PILImage.Image) -> PILImage.Image:
-        """Convert image into RGB mode if not already in this mode"""
+        """Convert image into RGB mode if not already in this mode."""
         if img.mode == "RGB":
             return img
         return img.convert("RGB")
@@ -1212,7 +1202,7 @@ class Image:
     def _operation_exif_rotate(
         image: PILImage.Image, image_meta: "Image"
     ) -> PILImage.Image:
-        """Rotate the image with the information from exif data"""
+        """Rotate the image with the information from exif data."""
         orientation = image_meta.exif_orig.get(EXIF_TAGS_NAME_CODE["Orientation"])
         if orientation is None:
             return image
@@ -1267,7 +1257,7 @@ class Image:
         return image
 
     def _operation_remove_alpha(self, image: PILImage.Image) -> PILImage.Image:
-        """Remove the alpha channel"""
+        """Remove the alpha channel."""
         if not self.is_alpha(image):
             return image
         background = PILImage.new(
@@ -1286,7 +1276,7 @@ class Image:
         return image.quantize(*args, **kwargs)
 
     def _operation_watermark(self, image: PILImage.Image) -> PILImage.Image:
-        """Add the watermark"""
+        """Add the watermark."""
         if not self._pelican_settings["PHOTO_WATERMARK"]:
             return image
         if self.is_thumb and not self._pelican_settings["PHOTO_WATERMARK_THUMB"]:
@@ -1335,12 +1325,10 @@ class Image:
             mark_position = [
                 watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
             ]
-            mark_position = tuple(
-                [
+            mark_position = (
                     mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
                     mark_position[1] - text_size[1],
-                ]
-            )
+                )
 
             if not self.is_alpha(mark_image):
                 mark_image = mark_image.convert("RGBA")
@@ -1354,7 +1342,7 @@ class Image:
 
 
 class SrcSetImage(Image):
-    """Image in a srcset"""
+    """Image in a srcset."""
 
     def __init__(
         self,
@@ -1374,11 +1362,11 @@ class SrcSetImage(Image):
 
 
 class ImageSrcSet(list):
-    """List of images in the srcset attribute of an HTML img-tag"""
+    """List of images in the srcset attribute of an HTML img-tag."""
 
     @property
     def html_srcset(self) -> str:
-        """The string to put in srcset attribute of the img-tag"""
+        """The string to put in srcset attribute of the img-tag."""
         items = []
         img: SrcSetImage
         for img in self:
@@ -1393,7 +1381,7 @@ class ImageSrcSet(list):
 
 
 class SourceImage:
-    """A source image
+    """A source image.
 
     - Detect mime-type
     - Load caption
@@ -1438,33 +1426,33 @@ class SourceImage:
 
     @property
     def caption(self) -> Optional[Caption]:
-        """The caption of the image"""
+        """The caption of the image."""
         if self._caption.value is None:
             return None
         return self._caption
 
     @property
     def exif(self) -> Optional[Exif]:
-        """Exif information"""
+        """Exif information."""
         if self._exif.value is None:
             return None
         return self._exif
 
     @property
     def is_excluded(self) -> bool:
-        """Is the image excluded"""
+        """Is the image excluded."""
         if self._excluded.value is None:
             return False
         return True
 
     def open(self) -> PILImage.Image:
-        """Open the image with PIL/Pillow"""
+        """Open the image with PIL/Pillow."""
         logger.debug(f"photos: Open file {self.filename}")
         return PILImage.open(self.filename)
 
     @classmethod
     def from_cache(cls, filename: str) -> "SourceImage":
-        """Create a new SrcImage object or return it from the cache"""
+        """Create a new SrcImage object or return it from the cache."""
         source_image = cls.image_cache.get(filename)
         if source_image is None:
             source_image = cls(filename=filename)
@@ -1528,7 +1516,7 @@ def get_process_pool():
 
 
 def initialized(pelican: Pelican):
-    """Initialize the default settings"""
+    """Initialize the default settings."""
     global g_process_pool
     p = os.path.expanduser("~/Pictures")
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
@@ -1762,7 +1750,7 @@ def build_license(license, author):
 
 
 def process_image_process_wrapper(image: Image):
-    """Wrapper to call an object function in the pool process"""
+    """Wrapper to call an object function in the pool process."""
     try:
         return image.process()
     except Exception as e:
@@ -1772,7 +1760,7 @@ def process_image_process_wrapper(image: Image):
 
 @measure_time
 def process_image_queue():
-    """Launch the jobs to process the images in the resize queue"""
+    """Launch the jobs to process the images in the resize queue."""
     global g_image_queue
 
     logger.info(f"Found {len(g_image_queue)} images in resize queue")
@@ -1804,8 +1792,7 @@ def process_image_queue():
 
 @measure_time
 def detect_inline_images(content: pelican.contents.Content):
-    """Find images in the generated content and replace them with the processed images
-    """
+    """Find images in the generated content and replace them with the processed images."""
     regex = r"""
         <\s*
         (?P<tag>[^\s\>]+)  # detect the tag
@@ -1926,6 +1913,7 @@ def galleries_string_decompose(gallery_string) -> list[dict[str, Any]]:
         logger.error(
             f"Unexpected gallery location format! \n{pprint.pformat(galleries)}"
         )
+        return None
 
 
 @measure_time
@@ -1956,7 +1944,7 @@ def process_content_galleries(
 
 @measure_time
 def detect_inline_galleries(content: Union[Article, Page]):
-    """Find galleries specified as inline gallery"""
+    """Find galleries specified as inline gallery."""
     inline_galleries = {}
     if pelican_settings["PHOTO_INLINE_GALLERY_ENABLED"]:
         gallery_strings = re.finditer(
@@ -2024,7 +2012,7 @@ def detect_inline_contents(content: Union[Article, Page]):
 
 
 def detect_meta_galleries(content: Union[Article, Page]):
-    """Find galleries specified in the meta data or as inline gallery"""
+    """Find galleries specified in the meta data or as inline gallery."""
     if "gallery" in content.metadata:
         gallery = content.metadata.get("gallery")
         if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
@@ -2035,7 +2023,7 @@ def detect_meta_galleries(content: Union[Article, Page]):
 
 def detect_meta_images(content: pelican.contents.Content):
     """Look for article or page photos specified in the meta data
-    Find images in the generated content and replace them with the processed images
+    Find images in the generated content and replace them with the processed images.
     """
     image = content.metadata.get("image", None)
     if image:
