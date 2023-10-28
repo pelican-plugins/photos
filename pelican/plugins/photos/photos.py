@@ -13,7 +13,7 @@ import os
 import pprint
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Optional, Union
 import urllib.parse
 
 from pelican import Pelican, signals
@@ -24,7 +24,7 @@ from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
 
 logger = logging.getLogger(__name__)
-pelican_settings: Dict[str, Any] = {}
+pelican_settings: dict[str, Any] = {}
 pelican_output_path: Optional[str] = None
 pelican_photo_inline_galleries = {}
 g_generator = None
@@ -33,12 +33,17 @@ g_profiles = {}
 g_profiling_call_level = 0
 g_process_pool: Optional[multiprocessing.Pool] = None
 g_process_pool_initialized: bool = False
-g_image_cache: Dict[str, "Image"] = {}
+g_image_cache: dict[str, "Image"] = {}
 
 try:
-    from PIL import ExifTags
-    from PIL import Image as PILImage
-    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
+    from PIL import (
+        ExifTags,
+        Image as PILImage,
+        ImageDraw,
+        ImageEnhance,
+        ImageFont,
+        ImageOps,
+    )
 except ImportError as e:
     logger.error("PIL/Pillow not found")
     raise e
@@ -117,14 +122,14 @@ class Profile:
     def __init__(
         self,
         name: str,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         default_profile: Optional["Profile"] = None,
     ):
         self.name = name
         self._config = config
         self._default_profile = default_profile
 
-    def get_image_config(self, name) -> Dict[str, Any]:
+    def get_image_config(self, name) -> dict[str, Any]:
         images = self._config.get("images")
         config = None
         if images is not None:
@@ -160,11 +165,11 @@ class Profile:
         return self.get_image_config("article").get("file_suffix", "a")
 
     @property
-    def article_html_img_attributes(self) -> Dict[str, str]:
+    def article_html_img_attributes(self) -> dict[str, str]:
         return self.get_image_config("article").get("html_img_attributes", {})
 
     @property
-    def article_image_spec(self) -> Dict[str, Any]:
+    def article_image_spec(self) -> dict[str, Any]:
         return self.get_image_config("article")["specs"]
 
     @property
@@ -172,11 +177,11 @@ class Profile:
         return self.get_image_config("gallery").get("file_suffix", "")
 
     @property
-    def gallery_html_img_attributes(self) -> Dict[str, str]:
+    def gallery_html_img_attributes(self) -> dict[str, str]:
         return self.get_image_config("gallery").get("html_img_attributes", {})
 
     @property
-    def gallery_image_spec(self) -> Dict[str, Any]:
+    def gallery_image_spec(self) -> dict[str, Any]:
         return self.get_image_config("gallery")["specs"]
 
     @property
@@ -184,11 +189,11 @@ class Profile:
         return self.get_image_config("thumb").get("file_suffix", "t")
 
     @property
-    def thumb_html_img_attributes(self) -> Dict[str, str]:
+    def thumb_html_img_attributes(self) -> dict[str, str]:
         return self.get_image_config("thumb").get("html_img_attributes", {})
 
     @property
-    def thumb_image_spec(self) -> Dict[str, Any]:
+    def thumb_image_spec(self) -> dict[str, Any]:
         return self.get_image_config("thumb")["specs"]
 
 
@@ -220,7 +225,7 @@ def measure_time(func):
         end_time = time.perf_counter()
         total_time = end_time - start_time
         logger.debug(
-            f"{msg_prefix_end}Call {func.__name__}()" f" took {total_time:.4f} seconds"
+            f"{msg_prefix_end}Call {func.__name__}() took {total_time:.4f} seconds"
         )
         return result
 
@@ -228,7 +233,7 @@ def measure_time(func):
 
 
 @measure_time
-def find_profile(names: List[str], default_not_found=True):
+def find_profile(names: list[str], default_not_found=True):
     """Find first matching profile"""
     for name in names:
         try:
@@ -251,8 +256,8 @@ def get_profile(name: str) -> Profile:
 
 def get_image_from_string(
     url_string: str,
-    image_class: Optional[Type["BaseImage"]] = None,
-    default_image_class: Optional[Type["BaseImage"]] = None,
+    image_class: Optional[type["BaseImage"]] = None,
+    default_image_class: Optional[type["BaseImage"]] = None,
 ) -> "BaseImage":
     value_mapping = {
         "profile": "profile_name",
@@ -282,16 +287,16 @@ def get_image_from_string(
 
 
 class BaseNoteCache:
-    note_cache: Dict[str, "BaseNoteCache"] = {}
+    note_cache: dict[str, "BaseNoteCache"] = {}
     note_filename = None
 
     def __init__(self, filename):
         self.filename = filename
         self.note_cache[self.filename] = self
-        self.notes: Dict[str, str] = {}
+        self.notes: dict[str, str] = {}
         self._read()
 
-    def _parse_line(self, line: str) -> Tuple[str, Any]:
+    def _parse_line(self, line: str) -> tuple[str, Any]:
         raise NotImplementedError("Line parser not implemented")
 
     def _read(self):
@@ -342,12 +347,12 @@ class BaseNoteCache:
 
 
 class BaseNoteKeyCache(BaseNoteCache):
-    def _parse_line(self, line: str) -> Tuple[str, bool]:
+    def _parse_line(self, line: str) -> tuple[str, bool]:
         return line.strip(), True
 
 
 class BaseNoteKeyValueCache(BaseNoteCache):
-    def _parse_line(self, line: str) -> Tuple[str, str]:
+    def _parse_line(self, line: str) -> tuple[str, str]:
         # parse content
         m = line.split(":", 1)
         if len(m) > 1:
@@ -488,8 +493,7 @@ class ArticleImage(BaseImage):
         self.thumb = enqueue_image(img)
 
     def __getitem__(self, index):
-        """
-        Legacy support
+        """Legacy support
         """
         if index == 0:
             return self.file
@@ -573,8 +577,7 @@ class ContentImageLightbox(BaseImage):
 
 
 class Gallery:
-    """
-    Process a single gallery
+    """Process a single gallery
 
     - look for images
     - read meta data
@@ -631,7 +634,7 @@ class Gallery:
             image_filenames.append(f"{location_parsed['type']}{image_filename}")
 
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
-        self.images: List[GalleryImage] = []
+        self.images: list[GalleryImage] = []
 
         self.title = location_parsed["title"]
         for pic in image_filenames:
@@ -646,7 +649,7 @@ class Gallery:
             except ImageExcluded:
                 logger.debug(f"photos: Image {pic} excluded")
             except FileExcluded as e:
-                logger.debug(f"photos: File {pic} excluded: {str(e)}")
+                logger.debug(f"photos: File {pic} excluded: {e!s}")
 
     def __getitem__(self, item):
         if item == 0:
@@ -658,8 +661,7 @@ class Gallery:
 
 
 class GalleryImage(BaseImage):
-    """
-    Image of a gallery
+    """Image of a gallery
 
     """
 
@@ -711,8 +713,7 @@ class GalleryImage(BaseImage):
         self.thumb = enqueue_image(img)
 
     def __getitem__(self, item):
-        """
-        Legacy support
+        """Legacy support
         """
         if item == 0:
             return self.file
@@ -771,8 +772,7 @@ class GlobalImage(BaseImage):
 
 
 class Image:
-    """
-    The main Image class to hold all information of the generated image and to process
+    """The main Image class to hold all information of the generated image and to process
     the image.
     """
 
@@ -780,8 +780,8 @@ class Image:
         self,
         src,
         dst,
-        spec: Optional[Dict[str, Any]] = None,
-        specs: Optional[Dict[str, Dict[str, Any]]] = None,
+        spec: Optional[dict[str, Any]] = None,
+        specs: Optional[dict[str, dict[str, Any]]] = None,
         is_thumb=False,
     ):
         if spec is not None and specs is not None:
@@ -800,10 +800,10 @@ class Image:
         self.images = {}
 
         #: The exif data used for the result image
-        self.exif_result: Optional[Dict] = None
+        self.exif_result: Optional[dict] = None
 
         #: The exif data from the source image
-        self.exif_orig: Optional[Dict] = None
+        self.exif_orig: Optional[dict] = None
 
         #: The icc profile from the source image
         self.icc_profile: Optional[bytes] = None
@@ -823,12 +823,12 @@ class Image:
                 spec = specs["default"]
 
         #: The specification how to transform the source image
-        self.spec: Dict[str, Any] = spec.copy()
+        self.spec: dict[str, Any] = spec.copy()
 
         #: Image type e.g. jpeg, webp
         self.type = spec["type"].lower()
 
-        image_options: Dict[str, Any] = self._pelican_settings[
+        image_options: dict[str, Any] = self._pelican_settings[
             "PHOTO_DEFAULT_IMAGE_OPTIONS"
         ].get(self.type)
         if image_options is None:
@@ -842,7 +842,7 @@ class Image:
         image_options.update(spec.get("options", {}))
         self.spec["options"] = image_options
 
-        srcset_specs: Optional[List, Tuple] = self.spec.get("srcset")
+        srcset_specs: Optional[list, tuple] = self.spec.get("srcset")
         if not isinstance(srcset_specs, (list, tuple)):
             srcset_specs = []
 
@@ -857,7 +857,7 @@ class Image:
             )
             self.srcset.append(enqueue_image(img))
 
-        additional_images: Dict[str, Any] = spec.get("images")
+        additional_images: dict[str, Any] = spec.get("images")
         if additional_images is None:
             additional_images = {}
 
@@ -897,9 +897,9 @@ class Image:
             ),
         )
 
-        self.pre_operations: List[Union[str, List, Tuple]] = []
-        self.operations: List[Union[str, List, Tuple]] = []
-        self.post_operations: List[Union[str, List, Tuple]] = []
+        self.pre_operations: list[Union[str, list, tuple]] = []
+        self.operations: list[Union[str, list, tuple]] = []
+        self.post_operations: list[Union[str, list, tuple]] = []
 
         self.pre_operations.append("exif.rotate")
         self.pre_operations.append("exif.manipulate")
@@ -1064,9 +1064,8 @@ class Image:
         self._result_info_loaded = True
         return results
 
-    def apply_result_info(self, info: Dict[str, Any]):
-        """
-        Apply the information from the result image if it has been processed in a
+    def apply_result_info(self, info: dict[str, Any]):
+        """Apply the information from the result image if it has been processed in a
         different process.
         """
         for name in self._result_info_allowed_names:
@@ -1074,7 +1073,7 @@ class Image:
                 setattr(self, name, info[name])
         self._result_info_loaded = True
 
-    def process(self) -> Tuple[str, Dict[str, Any]]:
+    def process(self) -> tuple[str, dict[str, Any]]:
         """Process the image"""
         process = multiprocessing.current_process()
         logger.info(
@@ -1361,7 +1360,7 @@ class SrcSetImage(Image):
         self,
         src,
         dst,
-        spec: Optional[Dict[str, Any]] = None,
+        spec: Optional[dict[str, Any]] = None,
         is_thumb=False,
     ):
         self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
@@ -1394,8 +1393,7 @@ class ImageSrcSet(list):
 
 
 class SourceImage:
-    """
-    A source image
+    """A source image
 
     - Detect mime-type
     - Load caption
@@ -1404,7 +1402,7 @@ class SourceImage:
     """
 
     #: Dict to cache the source images, so we only have to process it once
-    image_cache: Dict[str, "SourceImage"] = {}
+    image_cache: dict[str, "SourceImage"] = {}
 
     def __init__(self, filename):
         #: filename of the image
@@ -1724,8 +1722,7 @@ def initialized(pelican: Pelican):
 
 @measure_time
 def enqueue_image(img: Image) -> Image:
-    """
-    Add the image to the resize list. If an image with the same destination filename
+    """Add the image to the resize list. If an image with the same destination filename
     and the same specifications does already exist it will return this instead.
     """
     if img.dst not in g_image_cache:
@@ -1761,9 +1758,7 @@ def build_license(license, author):
             Author=author, Year=year, URL=licenses[license]["URL"]
         )
     else:
-        return "Copyright {Year} {Author}, All Rights Reserved".format(
-            Author=author, Year=year
-        )
+        return f"Copyright {year} {author}, All Rights Reserved"
 
 
 def process_image_process_wrapper(image: Image):
@@ -1809,8 +1804,7 @@ def process_image_queue():
 
 @measure_time
 def detect_inline_images(content: pelican.contents.Content):
-    """
-    Find images in the generated content and replace them with the processed images
+    """Find images in the generated content and replace them with the processed images
     """
     regex = r"""
         <\s*
@@ -1862,7 +1856,7 @@ def detect_inline_images(content: pelican.contents.Content):
                         profile=profile,
                     )
                 except FileNotFound as e:
-                    logger.error(f"photos: {str(e)}")
+                    logger.error(f"photos: {e!s}")
                     continue
 
             elif what == "lightbox":
@@ -1872,7 +1866,7 @@ def detect_inline_images(content: pelican.contents.Content):
                         profile=profile,
                     )
                 except FileNotFound as e:
-                    logger.error(f"photos: {str(e)}")
+                    logger.error(f"photos: {e!s}")
                     continue
             else:
                 logger.warning(f"Unable to detect type '{what}' for '{m.group()}'")
@@ -1888,7 +1882,7 @@ def detect_inline_images(content: pelican.contents.Content):
             try:
                 img = ContentImage(filename=value)
             except FileNotFound as e:
-                logger.error(f"photos: {str(e)}")
+                logger.error(f"photos: {e!s}")
                 continue
 
             inline_images[m.group()] = {
@@ -1902,7 +1896,7 @@ def detect_inline_images(content: pelican.contents.Content):
     return inline_images
 
 
-def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
+def galleries_string_decompose(gallery_string) -> list[dict[str, Any]]:
     splitter_regex = re.compile(r"[\s,]*?({photo}|{filename})")
     title_regex = re.compile(r"{(.+)}")
     galleries = map(
@@ -1939,9 +1933,8 @@ def process_content_galleries(
     content: Union[Article, Page],
     location,
     profile_name: Optional[str] = None,
-) -> List[Gallery]:
-    """
-    Process all galleries attached to an article or page.
+) -> list[Gallery]:
+    """Process all galleries attached to an article or page.
 
     :param content: The content object
     :param location: Galleries
@@ -1956,7 +1949,7 @@ def process_content_galleries(
             gallery = Gallery(content, gallery, profile_name=profile_name)
             photo_galleries.append(gallery)
         except GalleryNotFound as e:
-            logger.error(f"photos: {str(e)}")
+            logger.error(f"photos: {e!s}")
 
     return photo_galleries
 
@@ -2041,8 +2034,7 @@ def detect_meta_galleries(content: Union[Article, Page]):
 
 
 def detect_meta_images(content: pelican.contents.Content):
-    """
-    Look for article or page photos specified in the meta data
+    """Look for article or page photos specified in the meta data
     Find images in the generated content and replace them with the processed images
     """
     image = content.metadata.get("image", None)
@@ -2051,7 +2043,7 @@ def detect_meta_images(content: pelican.contents.Content):
             try:
                 content.photo_image = ArticleImage(content=content, filename=image)
             except (FileNotFound, InternalError) as e:
-                logger.error(f"photo: {str(e)}")
+                logger.error(f"photo: {e!s}")
         else:
             logger.error(f"photos: Image tag not recognized: {image}")
 
@@ -2272,7 +2264,7 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
 
 @measure_time
 def handle_signal_all_generators_finalized(
-    generators: List[pelican.generators.Generator],
+    generators: list[pelican.generators.Generator],
 ):
     global_images = {}
     for name, config in pelican_settings["PHOTO_GLOBAL_IMAGES"].items():
@@ -2282,14 +2274,14 @@ def handle_signal_all_generators_finalized(
                 profile_name=config.get("profile"),
             )
         except (FileNotFound, InternalError) as e:
-            logger.error(f"photo: {str(e)}")
+            logger.error(f"photo: {e!s}")
 
     pelican_settings["PHOTO_GLOBAL_IMAGES_PROCESSED"].update(global_images)
 
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
             article: Article
-            article_lists: List[List[Article]] = [
+            article_lists: list[list[Article]] = [
                 generator.articles,
                 generator.translations,
                 generator.drafts,

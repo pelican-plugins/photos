@@ -5,7 +5,6 @@ from tempfile import mkdtemp
 
 from pelican.generators import ArticlesGenerator
 from pelican.tests.support import get_settings, unittest
-
 import photos
 
 CUR_DIR = os.path.dirname(__file__)
