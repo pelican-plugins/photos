@@ -55,8 +55,8 @@ jobs:
         run: pdm install
 
       # Disabled until the code can be made ruff-compatible
-      # - name: Run linters
-      #   run: pdm run invoke lint --diff
+      - name: Run linters
+        run: pdm run invoke lint --diff
 
   deploy:
     name: Deploy

@@ -1,3 +1,4 @@
+import abc
 import base64
 from collections import namedtuple
 import datetime
@@ -13,7 +14,7 @@ import os
 import pprint
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, ClassVar, Optional, Union
 import urllib.parse
 
 from pelican import Pelican, signals
@@ -24,7 +25,7 @@ from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
 
 logger = logging.getLogger(__name__)
-pelican_settings: Dict[str, Any] = {}
+pelican_settings: dict[str, Any] = {}
 pelican_output_path: Optional[str] = None
 pelican_photo_inline_galleries = {}
 g_generator = None
@@ -33,15 +34,20 @@ g_profiles = {}
 g_profiling_call_level = 0
 g_process_pool: Optional[multiprocessing.Pool] = None
 g_process_pool_initialized: bool = False
-g_image_cache: Dict[str, "Image"] = {}
+g_image_cache: dict[str, "Image"] = {}
 
 try:
-    from PIL import ExifTags
-    from PIL import Image as PILImage
-    from PIL import ImageDraw, ImageEnhance, ImageFont, ImageOps
-except ImportError as e:
-    logger.error("PIL/Pillow not found")
-    raise e
+    from PIL import (
+        ExifTags,
+        Image as PILImage,
+        ImageDraw,
+        ImageEnhance,
+        ImageFont,
+        ImageOps,
+    )
+except ImportError:
+    logger.error("PIL/Pillow not found")  # noqa: TRY400
+    raise
 
 EXIF_TAGS_NAME_CODE = {v: n for n, v in ExifTags.TAGS.items()}
 
@@ -117,14 +123,14 @@ class Profile:
     def __init__(
         self,
         name: str,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         default_profile: Optional["Profile"] = None,
     ):
         self.name = name
         self._config = config
         self._default_profile = default_profile
 
-    def get_image_config(self, name) -> Dict[str, Any]:
+    def get_image_config(self, name) -> dict[str, Any]:
         images = self._config.get("images")
         config = None
         if images is not None:
@@ -132,7 +138,7 @@ class Profile:
         if config is None and self._default_profile is not None:
             config = self._default_profile.get_image_config(name)
         if config is None:
-            raise ImageConfigNotFound(
+            raise ImageConfigNotFound(  # noqa: TRY003
                 f"Unable to find image config for '{name}' in profile '{self.name}'"
             )
         return config
@@ -160,11 +166,11 @@ class Profile:
         return self.get_image_config("article").get("file_suffix", "a")
 
     @property
-    def article_html_img_attributes(self) -> Dict[str, str]:
+    def article_html_img_attributes(self) -> dict[str, str]:
         return self.get_image_config("article").get("html_img_attributes", {})
 
     @property
-    def article_image_spec(self) -> Dict[str, Any]:
+    def article_image_spec(self) -> dict[str, Any]:
         return self.get_image_config("article")["specs"]
 
     @property
@@ -172,11 +178,11 @@ class Profile:
         return self.get_image_config("gallery").get("file_suffix", "")
 
     @property
-    def gallery_html_img_attributes(self) -> Dict[str, str]:
+    def gallery_html_img_attributes(self) -> dict[str, str]:
         return self.get_image_config("gallery").get("html_img_attributes", {})
 
     @property
-    def gallery_image_spec(self) -> Dict[str, Any]:
+    def gallery_image_spec(self) -> dict[str, Any]:
         return self.get_image_config("gallery")["specs"]
 
     @property
@@ -184,11 +190,11 @@ class Profile:
         return self.get_image_config("thumb").get("file_suffix", "t")
 
     @property
-    def thumb_html_img_attributes(self) -> Dict[str, str]:
+    def thumb_html_img_attributes(self) -> dict[str, str]:
         return self.get_image_config("thumb").get("html_img_attributes", {})
 
     @property
-    def thumb_image_spec(self) -> Dict[str, Any]:
+    def thumb_image_spec(self) -> dict[str, Any]:
         return self.get_image_config("thumb")["specs"]
 
 
@@ -220,7 +226,7 @@ def measure_time(func):
         end_time = time.perf_counter()
         total_time = end_time - start_time
         logger.debug(
-            f"{msg_prefix_end}Call {func.__name__}()" f" took {total_time:.4f} seconds"
+            f"{msg_prefix_end}Call {func.__name__}() took {total_time:.4f} seconds"
         )
         return result
 
@@ -228,8 +234,8 @@ def measure_time(func):
 
 
 @measure_time
-def find_profile(names: List[str], default_not_found=True):
-    """Find first matching profile"""
+def find_profile(names: list[str], default_not_found=True):
+    """Find first matching profile."""
     for name in names:
         try:
             return get_profile(name)
@@ -237,12 +243,12 @@ def find_profile(names: List[str], default_not_found=True):
             pass
     if default_not_found:
         return get_profile("default")
-    else:
-        raise ProfileNotFound(f"Unable to find any of the profiles: {', '.join(names)}")
+
+    raise ProfileNotFound(f"Unable to find any of the profiles: {', '.join(names)}")
 
 
 def get_profile(name: str) -> Profile:
-    """Return the profile"""
+    """Return the profile."""
     profile = g_profiles.get(name)
     if profile is None:
         raise ProfileNotFound(f"Unable to find profile '{name}'")
@@ -251,8 +257,8 @@ def get_profile(name: str) -> Profile:
 
 def get_image_from_string(
     url_string: str,
-    image_class: Optional[Type["BaseImage"]] = None,
-    default_image_class: Optional[Type["BaseImage"]] = None,
+    image_class: Optional[type["BaseImage"]] = None,
+    default_image_class: Optional[type["BaseImage"]] = None,
 ) -> "BaseImage":
     value_mapping = {
         "profile": "profile_name",
@@ -281,17 +287,21 @@ def get_image_from_string(
     return image_class(filename=url.path, **kwargs)
 
 
-class BaseNoteCache:
-    note_cache: Dict[str, "BaseNoteCache"] = {}
-    note_filename = None
+class BaseNoteCache(abc.ABC):
+    note_cache: ClassVar[dict[str, "BaseNoteCache"]] = {}
+
+    @abc.abstractclassmethod
+    def note_filename(cls):
+        raise NotImplementedError
 
     def __init__(self, filename):
         self.filename = filename
         self.note_cache[self.filename] = self
-        self.notes: Dict[str, str] = {}
+        self.notes: dict[str, str] = {}
         self._read()
 
-    def _parse_line(self, line: str) -> Tuple[str, Any]:
+    @abc.abstractmethod
+    def _parse_line(self, line: str) -> tuple[str, Any]:
         raise NotImplementedError("Line parser not implemented")
 
     def _read(self):
@@ -302,7 +312,7 @@ class BaseNoteCache:
             logger.debug(f"Reading information from {self.filename}")
             with pelican_open(self.filename) as text:
                 for line_number, line in enumerate(text.splitlines()):
-                    line = line.strip()
+                    line = line.strip()  # noqa: PLW2901
 
                     # skip empty lines
                     if len(line) == 0:
@@ -321,10 +331,9 @@ class BaseNoteCache:
                             f" on line {line_number + 1}: {e}"
                         )
 
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 f"There was an error while processing the {self.filename}. "
-                f"Exception message: {e}"
             )
 
     def get_value(self, source_image):
@@ -342,12 +351,12 @@ class BaseNoteCache:
 
 
 class BaseNoteKeyCache(BaseNoteCache):
-    def _parse_line(self, line: str) -> Tuple[str, bool]:
+    def _parse_line(self, line: str) -> tuple[str, bool]:
         return line.strip(), True
 
 
 class BaseNoteKeyValueCache(BaseNoteCache):
-    def _parse_line(self, line: str) -> Tuple[str, str]:
+    def _parse_line(self, line: str) -> tuple[str, str]:
         # parse content
         m = line.split(":", 1)
         if len(m) > 1:
@@ -359,15 +368,24 @@ class BaseNoteKeyValueCache(BaseNoteCache):
 
 
 class CaptionCache(BaseNoteKeyValueCache):
-    note_filename = "captions.txt"
+    @classmethod
+    @property
+    def note_filename(cls):
+        return "captions.txt"
 
 
 class ExifCache(BaseNoteKeyValueCache):
-    note_filename = "exif.txt"
+    @classmethod
+    @property
+    def note_filename(cls):
+        return "exif.txt"
 
 
 class ExcludeCache(BaseNoteKeyCache):
-    note_filename = "blacklist.txt"
+    @classmethod
+    @property
+    def note_filename(cls):
+        return "blacklist.txt"
 
 
 class BaseNote:
@@ -426,11 +444,11 @@ class BaseImage:
                 profile_name = "default"
             try:
                 self.profile = get_profile(profile_name)
-            except ProfileNotFound as e:
+            except ProfileNotFound:
                 logger.error(
                     f"Unable to find profile '{profile_name}' for image '{filename}'"
                 )
-                raise e
+                raise
 
 
 class ArticleImage(BaseImage):
@@ -488,17 +506,17 @@ class ArticleImage(BaseImage):
         self.thumb = enqueue_image(img)
 
     def __getitem__(self, index):
-        """
-        Legacy support
-        """
+        """Legacy support."""
         if index == 0:
             return self.file
-        elif index == 1:
+
+        if index == 1:
             return self.image.web_filename
-        elif index == 2:
+
+        if index == 2:
             return self.thumb.web_filename
-        else:
-            raise IndexError
+
+        raise IndexError
 
 
 class ContentImage(BaseImage):
@@ -573,8 +591,7 @@ class ContentImageLightbox(BaseImage):
 
 
 class Gallery:
-    """
-    Process a single gallery
+    """Process a single gallery.
 
     - look for images
     - read meta data
@@ -582,7 +599,7 @@ class Gallery:
     - enqueue the images to be processed
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0912 -- too many branches
         self,
         content: Union[Article, Page],
         location_parsed,
@@ -631,7 +648,7 @@ class Gallery:
             image_filenames.append(f"{location_parsed['type']}{image_filename}")
 
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
-        self.images: List[GalleryImage] = []
+        self.images: list[GalleryImage] = []
 
         self.title = location_parsed["title"]
         for pic in image_filenames:
@@ -646,22 +663,20 @@ class Gallery:
             except ImageExcluded:
                 logger.debug(f"photos: Image {pic} excluded")
             except FileExcluded as e:
-                logger.debug(f"photos: File {pic} excluded: {str(e)}")
+                logger.debug(f"photos: File {pic} excluded: {e!s}")
 
     def __getitem__(self, item):
         if item == 0:
             return self.title
-        elif item == 1:
+
+        if item == 1:
             return self.images
-        else:
-            raise IndexError
+
+        raise IndexError
 
 
 class GalleryImage(BaseImage):
-    """
-    Image of a gallery
-
-    """
+    """Image of a gallery."""
 
     def __init__(
         self,
@@ -711,23 +726,21 @@ class GalleryImage(BaseImage):
         self.thumb = enqueue_image(img)
 
     def __getitem__(self, item):
-        """
-        Legacy support
-        """
+        """Legacy support."""
         if item == 0:
             return self.file
-        elif item == 1:
+
+        if item == 1:
             return self.image
-        elif item == 2:
+
+        if item == 2:
             return self.thumb
-        elif item == 3:
-            if self.exif is None:
-                return ""
-            return self.exif.value
-        elif item == 4:
-            if self.caption is None:
-                return ""
-            return self.caption.value
+
+        if item == 3:
+            return "" if self.exif is None else self.exif.value
+
+        if item == 4:
+            return "" if self.caption is None else self.caption.value
 
         raise IndexError
 
@@ -741,7 +754,7 @@ class GalleryImage(BaseImage):
 
     @property
     def is_excluded(self) -> bool:
-        """Is the image is excluded from the gallery"""
+        """Is the image is excluded from the gallery."""
         return self.image.is_excluded
 
 
@@ -771,17 +784,19 @@ class GlobalImage(BaseImage):
 
 
 class Image:
-    """
-    The main Image class to hold all information of the generated image and to process
+    """The main Image class.
+
+    This class holds all information of the generated image that is required to process
     the image.
+
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0912, PLR0913, PLR0915 -- this function does a _lot_
         self,
         src,
         dst,
-        spec: Optional[Dict[str, Any]] = None,
-        specs: Optional[Dict[str, Dict[str, Any]]] = None,
+        spec: Optional[dict[str, Any]] = None,
+        specs: Optional[dict[str, dict[str, Any]]] = None,
         is_thumb=False,
     ):
         if spec is not None and specs is not None:
@@ -800,10 +815,10 @@ class Image:
         self.images = {}
 
         #: The exif data used for the result image
-        self.exif_result: Optional[Dict] = None
+        self.exif_result: Optional[dict] = None
 
         #: The exif data from the source image
-        self.exif_orig: Optional[Dict] = None
+        self.exif_orig: Optional[dict] = None
 
         #: The icc profile from the source image
         self.icc_profile: Optional[bytes] = None
@@ -823,12 +838,12 @@ class Image:
                 spec = specs["default"]
 
         #: The specification how to transform the source image
-        self.spec: Dict[str, Any] = spec.copy()
+        self.spec: dict[str, Any] = spec.copy()
 
         #: Image type e.g. jpeg, webp
         self.type = spec["type"].lower()
 
-        image_options: Dict[str, Any] = self._pelican_settings[
+        image_options: dict[str, Any] = self._pelican_settings[
             "PHOTO_DEFAULT_IMAGE_OPTIONS"
         ].get(self.type)
         if image_options is None:
@@ -842,7 +857,7 @@ class Image:
         image_options.update(spec.get("options", {}))
         self.spec["options"] = image_options
 
-        srcset_specs: Optional[List, Tuple] = self.spec.get("srcset")
+        srcset_specs: Optional[list, tuple] = self.spec.get("srcset")
         if not isinstance(srcset_specs, (list, tuple)):
             srcset_specs = []
 
@@ -857,13 +872,13 @@ class Image:
             )
             self.srcset.append(enqueue_image(img))
 
-        additional_images: Dict[str, Any] = spec.get("images")
+        additional_images: dict[str, Any] = spec.get("images")
         if additional_images is None:
             additional_images = {}
 
         for add_img_name, add_img_spec in additional_images.items():
             if not isinstance(add_img_spec, dict):
-                add_img_spec = {}
+                add_img_spec = {}  # noqa: PLW2901
 
             add_img_spec_combined = {}
             # We use some values from the parent as default
@@ -897,9 +912,9 @@ class Image:
             ),
         )
 
-        self.pre_operations: List[Union[str, List, Tuple]] = []
-        self.operations: List[Union[str, List, Tuple]] = []
-        self.post_operations: List[Union[str, List, Tuple]] = []
+        self.pre_operations: list[Union[str, list, tuple]] = []
+        self.operations: list[Union[str, list, tuple]] = []
+        self.post_operations: list[Union[str, list, tuple]] = []
 
         self.pre_operations.append("exif.rotate")
         self.pre_operations.append("exif.manipulate")
@@ -990,23 +1005,23 @@ class Image:
 
     @property
     def average_color(self) -> Optional[str]:
-        """Average color"""
+        """Average color."""
         if self._average_color is None:
             self._load_result_info()
         if self._average_color:
             return "#{:02x}{:02x}{:02x}".format(*self._average_color)
-        else:
-            return None
+
+        return None
 
     @property
     def caption(self) -> Optional[Caption]:
-        """Caption of the image"""
+        """Caption of the image."""
         return self.source_image.caption
 
     @property
     def data(self) -> bytes:
-        fp = open(self.output_filename, "rb")
-        return fp.read()
+        with open(self.output_filename, "rb") as fp:
+            return fp.read()
 
     @property
     def data_base64(self) -> str:
@@ -1018,34 +1033,31 @@ class Image:
 
     @property
     def is_excluded(self) -> bool:
-        """Is the image on the exclude-list"""
+        """Is the image on the exclude-list."""
         return self.source_image.is_excluded
 
     @staticmethod
     def is_alpha(img: PILImage.Image) -> bool:
-        return (
-            True
-            if img.mode in ("RGBA", "LA")
-            or (img.mode == "P" and "transparency" in img.info)
-            else False
+        return bool(
+            img.mode in ("RGBA", "LA") or img.mode == "P" and "transparency" in img.info
         )
 
     @property
     def height(self) -> int:
-        """Height of the image"""
+        """Height of the image."""
         if self._height is None:
             self._load_result_info()
         return self._height
 
     @property
     def width(self) -> int:
-        """Width of the image"""
+        """Width of the image."""
         if self._width is None:
             self._load_result_info()
         return self._width
 
     def _load_result_info(self, image: Optional[PILImage.Image] = None):
-        """Load the information from the result image"""
+        """Load the information from the result image."""
         if not self._result_info_loaded:
             if image is None:
                 image: PILImage.Image = PILImage.open(self.output_filename)
@@ -1064,18 +1076,20 @@ class Image:
         self._result_info_loaded = True
         return results
 
-    def apply_result_info(self, info: Dict[str, Any]):
-        """
-        Apply the information from the result image if it has been processed in a
-        different process.
+    def apply_result_info(self, info: dict[str, Any]):
+        """Apply the information from the result image.
+
+        This occurs if it has been processed in a different process.
         """
         for name in self._result_info_allowed_names:
             if name in info:
                 setattr(self, name, info[name])
         self._result_info_loaded = True
 
-    def process(self) -> Tuple[str, Dict[str, Any]]:
-        """Process the image"""
+    def process(  # noqa: PLR0912, PLR0915 -- this function does a lot
+        self,
+    ) -> tuple[str, dict[str, Any]]:
+        """Process the image."""
         process = multiprocessing.current_process()
         logger.info(
             f"photos: make photo(PID: {process.pid}) {self.source_image.filename} "
@@ -1101,7 +1115,7 @@ class Image:
                 # Copy the exif data if we want to keep it
                 try:
                     self.exif_result = piexif.load(image.info["exif"])
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 -- we are just warning here
                     logger.warning(
                         "There was an error reading exif data from"
                         f" '{self.source_image.filename}': {e}"
@@ -1158,7 +1172,7 @@ class Image:
                 self.exif_result.pop(piexif.ExifIFD.SceneType, None)
 
                 exif_data = piexif.dump(self.exif_result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- we are just warning here
                 logger.warning(
                     "There was an error dumping exif data for image "
                     f" '{self.output_filename}': {e}"
@@ -1181,10 +1195,7 @@ class Image:
         Taken from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/362879
         """
         assert opacity >= 0 and opacity <= 1
-        if self.is_alpha(im):
-            im = im.copy()
-        else:
-            im = im.convert("RGBA")
+        im = im.copy() if self.is_alpha(im) else im.convert("RGBA")
 
         alpha = im.split()[3]
         alpha = ImageEnhance.Brightness(alpha).enhance(opacity)
@@ -1197,14 +1208,14 @@ class Image:
 
     @staticmethod
     def _operation_convert_mode_p(img: PILImage.Image) -> PILImage.Image:
-        """Convert image into P mode if not already in this mode"""
+        """Convert image into P mode if not already in this mode."""
         if img.mode == "P":
             return img
         return img.convert("P")
 
     @staticmethod
     def _operation_convert_mode_rgb(img: PILImage.Image) -> PILImage.Image:
-        """Convert image into RGB mode if not already in this mode"""
+        """Convert image into RGB mode if not already in this mode."""
         if img.mode == "RGB":
             return img
         return img.convert("RGB")
@@ -1213,7 +1224,7 @@ class Image:
     def _operation_exif_rotate(
         image: PILImage.Image, image_meta: "Image"
     ) -> PILImage.Image:
-        """Rotate the image with the information from exif data"""
+        """Rotate the image with the information from exif data."""
         orientation = image_meta.exif_orig.get(EXIF_TAGS_NAME_CODE["Orientation"])
         if orientation is None:
             return image
@@ -1268,7 +1279,7 @@ class Image:
         return image
 
     def _operation_remove_alpha(self, image: PILImage.Image) -> PILImage.Image:
-        """Remove the alpha channel"""
+        """Remove the alpha channel."""
         if not self.is_alpha(image):
             return image
         background = PILImage.new(
@@ -1287,7 +1298,7 @@ class Image:
         return image.quantize(*args, **kwargs)
 
     def _operation_watermark(self, image: PILImage.Image) -> PILImage.Image:
-        """Add the watermark"""
+        """Add the watermark."""
         if not self._pelican_settings["PHOTO_WATERMARK"]:
             return image
         if self.is_thumb and not self._pelican_settings["PHOTO_WATERMARK_THUMB"]:
@@ -1336,11 +1347,9 @@ class Image:
             mark_position = [
                 watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
             ]
-            mark_position = tuple(
-                [
-                    mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
-                    mark_position[1] - text_size[1],
-                ]
+            mark_position = (
+                mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
+                mark_position[1] - text_size[1],
             )
 
             if not self.is_alpha(mark_image):
@@ -1355,13 +1364,13 @@ class Image:
 
 
 class SrcSetImage(Image):
-    """Image in a srcset"""
+    """Image in a srcset."""
 
     def __init__(
         self,
         src,
         dst,
-        spec: Optional[Dict[str, Any]] = None,
+        spec: Optional[dict[str, Any]] = None,
         is_thumb=False,
     ):
         self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
@@ -1375,11 +1384,11 @@ class SrcSetImage(Image):
 
 
 class ImageSrcSet(list):
-    """List of images in the srcset attribute of an HTML img-tag"""
+    """List of images in the srcset attribute of an HTML img-tag."""
 
     @property
     def html_srcset(self) -> str:
-        """The string to put in srcset attribute of the img-tag"""
+        """The string to put in srcset attribute of the img-tag."""
         items = []
         img: SrcSetImage
         for img in self:
@@ -1394,8 +1403,7 @@ class ImageSrcSet(list):
 
 
 class SourceImage:
-    """
-    A source image
+    """A source image.
 
     - Detect mime-type
     - Load caption
@@ -1404,7 +1412,7 @@ class SourceImage:
     """
 
     #: Dict to cache the source images, so we only have to process it once
-    image_cache: Dict[str, "SourceImage"] = {}
+    image_cache: ClassVar[dict[str, "SourceImage"]] = {}
 
     def __init__(self, filename):
         #: filename of the image
@@ -1440,33 +1448,33 @@ class SourceImage:
 
     @property
     def caption(self) -> Optional[Caption]:
-        """The caption of the image"""
+        """The caption of the image."""
         if self._caption.value is None:
             return None
         return self._caption
 
     @property
     def exif(self) -> Optional[Exif]:
-        """Exif information"""
+        """Exif information."""
         if self._exif.value is None:
             return None
         return self._exif
 
     @property
     def is_excluded(self) -> bool:
-        """Is the image excluded"""
+        """Is the image excluded."""
         if self._excluded.value is None:
             return False
         return True
 
     def open(self) -> PILImage.Image:
-        """Open the image with PIL/Pillow"""
+        """Open the image with PIL/Pillow."""
         logger.debug(f"photos: Open file {self.filename}")
         return PILImage.open(self.filename)
 
     @classmethod
     def from_cache(cls, filename: str) -> "SourceImage":
-        """Create a new SrcImage object or return it from the cache"""
+        """Create a new SrcImage object or return it from the cache."""
         source_image = cls.image_cache.get(filename)
         if source_image is None:
             source_image = cls(filename=filename)
@@ -1529,9 +1537,8 @@ def get_process_pool():
     return g_process_pool
 
 
-def initialized(pelican: Pelican):
-    """Initialize the default settings"""
-    global g_process_pool
+def initialized(pelican: Pelican):  # noqa: PLR0915
+    """Initialize the default settings."""
     p = os.path.expanduser("~/Pictures")
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
     DEFAULT_CONFIG.setdefault(
@@ -1724,9 +1731,11 @@ def initialized(pelican: Pelican):
 
 @measure_time
 def enqueue_image(img: Image) -> Image:
-    """
-    Add the image to the resize list. If an image with the same destination filename
-    and the same specifications does already exist it will return this instead.
+    """Add the image to the resize list.
+
+    If an image with the same destination filename and the same specifications does
+    already exist it will return this instead.
+
     """
     if img.dst not in g_image_cache:
         g_image_cache[img.dst] = img
@@ -1760,24 +1769,22 @@ def build_license(license, author):
         return licenses[license]["Text"].format(
             Author=author, Year=year, URL=licenses[license]["URL"]
         )
-    else:
-        return "Copyright {Year} {Author}, All Rights Reserved".format(
-            Author=author, Year=year
-        )
+
+    return f"Copyright {year} {author}, All Rights Reserved"
 
 
 def process_image_process_wrapper(image: Image):
-    """Wrapper to call an object function in the pool process"""
+    """Create a wrapper to call an object function in the pool process."""
     try:
         return image.process()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- we are just warning here
         logger.error(f"photos: {e}")
         logger.warning("photos: An exception occurred", exc_info=e)
 
 
 @measure_time
 def process_image_queue():
-    """Launch the jobs to process the images in the resize queue"""
+    """Launch the jobs to process the images in the resize queue."""
     global g_image_queue
 
     logger.info(f"Found {len(g_image_queue)} images in resize queue")
@@ -1808,10 +1815,8 @@ def process_image_queue():
 
 
 @measure_time
-def detect_inline_images(content: pelican.contents.Content):
-    """
-    Find images in the generated content and replace them with the processed images
-    """
+def detect_inline_images(content: pelican.contents.Content):  # noqa: PLR0912
+    """Find images in the generated content and replace them with the processed images."""  # noqa: E501
     regex = r"""
         <\s*
         (?P<tag>[^\s\>]+)  # detect the tag
@@ -1822,9 +1827,7 @@ def detect_inline_images(content: pelican.contents.Content):
         (?P<path>{}(?P<value>.*?))  # the url value
         (?P=quote)
         (?P<attrs_after>[^\>]*>)
-    """.format(
-        pelican_settings["INTRASITE_LINK_REGEX"]
-    )
+    """.format(pelican_settings["INTRASITE_LINK_REGEX"])
     hrefs = re.compile(regex, re.X)
 
     inline_images = {}
@@ -1862,7 +1865,7 @@ def detect_inline_images(content: pelican.contents.Content):
                         profile=profile,
                     )
                 except FileNotFound as e:
-                    logger.error(f"photos: {str(e)}")
+                    logger.error(f"photos: {e!s}")
                     continue
 
             elif what == "lightbox":
@@ -1872,7 +1875,7 @@ def detect_inline_images(content: pelican.contents.Content):
                         profile=profile,
                     )
                 except FileNotFound as e:
-                    logger.error(f"photos: {str(e)}")
+                    logger.error(f"photos: {e!s}")
                     continue
             else:
                 logger.warning(f"Unable to detect type '{what}' for '{m.group()}'")
@@ -1888,7 +1891,7 @@ def detect_inline_images(content: pelican.contents.Content):
             try:
                 img = ContentImage(filename=value)
             except FileNotFound as e:
-                logger.error(f"photos: {str(e)}")
+                logger.error(f"photos: {e!s}")
                 continue
 
             inline_images[m.group()] = {
@@ -1902,7 +1905,7 @@ def detect_inline_images(content: pelican.contents.Content):
     return inline_images
 
 
-def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
+def galleries_string_decompose(gallery_string) -> list[dict[str, Any]]:
     splitter_regex = re.compile(r"[\s,]*?({photo}|{filename})")
     title_regex = re.compile(r"{(.+)}")
     galleries = map(
@@ -1928,10 +1931,9 @@ def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
             else:
                 gallery["title"] = DEFAULT_CONFIG["PHOTO_GALLERY_TITLE"]
         return galleries
-    else:
-        logger.error(
-            f"Unexpected gallery location format! \n{pprint.pformat(galleries)}"
-        )
+
+    logger.error(f"Unexpected gallery location format! \n{pprint.pformat(galleries)}")
+    return []
 
 
 @measure_time
@@ -1939,9 +1941,8 @@ def process_content_galleries(
     content: Union[Article, Page],
     location,
     profile_name: Optional[str] = None,
-) -> List[Gallery]:
-    """
-    Process all galleries attached to an article or page.
+) -> list[Gallery]:
+    """Process all galleries attached to an article or page.
 
     :param content: The content object
     :param location: Galleries
@@ -1951,19 +1952,19 @@ def process_content_galleries(
 
     galleries = galleries_string_decompose(location)
 
-    for gallery in galleries:
+    for gallery_name in galleries:
         try:
-            gallery = Gallery(content, gallery, profile_name=profile_name)
+            gallery = Gallery(content, gallery_name, profile_name=profile_name)
             photo_galleries.append(gallery)
         except GalleryNotFound as e:
-            logger.error(f"photos: {str(e)}")
+            logger.error(f"photos: {e!s}")
 
     return photo_galleries
 
 
 @measure_time
 def detect_inline_galleries(content: Union[Article, Page]):
-    """Find galleries specified as inline gallery"""
+    """Find galleries specified as inline gallery."""
     inline_galleries = {}
     if pelican_settings["PHOTO_INLINE_GALLERY_ENABLED"]:
         gallery_strings = re.finditer(
@@ -2031,7 +2032,7 @@ def detect_inline_contents(content: Union[Article, Page]):
 
 
 def detect_meta_galleries(content: Union[Article, Page]):
-    """Find galleries specified in the meta data or as inline gallery"""
+    """Find galleries specified in the meta data or as inline gallery."""
     if "gallery" in content.metadata:
         gallery = content.metadata.get("gallery")
         if gallery.startswith("{photo}") or gallery.startswith("{filename}"):
@@ -2041,9 +2042,9 @@ def detect_meta_galleries(content: Union[Article, Page]):
 
 
 def detect_meta_images(content: pelican.contents.Content):
-    """
-    Look for article or page photos specified in the meta data
-    Find images in the generated content and replace them with the processed images
+    """Look for article or page photos specified in the meta data.
+
+    Find images in the generated content and replace them with the processed images.
     """
     image = content.metadata.get("image", None)
     if image:
@@ -2051,7 +2052,7 @@ def detect_meta_images(content: pelican.contents.Content):
             try:
                 content.photo_image = ArticleImage(content=content, filename=image)
             except (FileNotFound, InternalError) as e:
-                logger.error(f"photo: {str(e)}")
+                logger.error(f"photo: {e!s}")
         else:
             logger.error(f"photos: Image tag not recognized: {image}")
 
@@ -2272,7 +2273,7 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
 
 @measure_time
 def handle_signal_all_generators_finalized(
-    generators: List[pelican.generators.Generator],
+    generators: list[pelican.generators.Generator],
 ):
     global_images = {}
     for name, config in pelican_settings["PHOTO_GLOBAL_IMAGES"].items():
@@ -2282,14 +2283,14 @@ def handle_signal_all_generators_finalized(
                 profile_name=config.get("profile"),
             )
         except (FileNotFound, InternalError) as e:
-            logger.error(f"photo: {str(e)}")
+            logger.error(f"photo: {e!s}")
 
     pelican_settings["PHOTO_GLOBAL_IMAGES_PROCESSED"].update(global_images)
 
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
             article: Article
-            article_lists: List[List[Article]] = [
+            article_lists: list[list[Article]] = [
                 generator.articles,
                 generator.translations,
                 generator.drafts,
@@ -2322,7 +2323,7 @@ def handle_signal_all_generators_finalized(
 
 
 def register():
-    """Uses the new style of registration based on GitHub Pelican issue #314."""
+    """Use the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
     signals.generator_init.connect(handle_signal_generator_init)
     signals.content_object_init.connect(handle_signal_content_object_init)
