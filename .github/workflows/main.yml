@@ -6,7 +6,7 @@ env:
   PYTEST_ADDOPTS: "--color=yes"
 
 permissions:
-  content: read
+  contents: read
 
 jobs:
   test:
