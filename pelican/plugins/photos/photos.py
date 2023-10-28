@@ -1827,9 +1827,7 @@ def detect_inline_images(content: pelican.contents.Content):  # noqa: PLR0912
         (?P<path>{}(?P<value>.*?))  # the url value
         (?P=quote)
         (?P<attrs_after>[^\>]*>)
-    """.format(
-        pelican_settings["INTRASITE_LINK_REGEX"]
-    )
+    """.format(pelican_settings["INTRASITE_LINK_REGEX"])
     hrefs = re.compile(regex, re.X)
 
     inline_images = {}
