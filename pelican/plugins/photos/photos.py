@@ -1,3 +1,4 @@
+import abc
 import base64
 from collections import namedtuple
 import datetime
@@ -13,7 +14,7 @@ import os
 import pprint
 import re
 import time
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 import urllib.parse
 
 from pelican import Pelican, signals
@@ -45,7 +46,7 @@ try:
         ImageOps,
     )
 except ImportError:
-    logger.error("PIL/Pillow not found")
+    logger.error("PIL/Pillow not found")  # noqa: TRY400
     raise
 
 EXIF_TAGS_NAME_CODE = {v: n for n, v in ExifTags.TAGS.items()}
@@ -137,7 +138,7 @@ class Profile:
         if config is None and self._default_profile is not None:
             config = self._default_profile.get_image_config(name)
         if config is None:
-            raise ImageConfigNotFound(
+            raise ImageConfigNotFound(  # noqa: TRY003
                 f"Unable to find image config for '{name}' in profile '{self.name}'"
             )
         return config
@@ -242,8 +243,8 @@ def find_profile(names: list[str], default_not_found=True):
             pass
     if default_not_found:
         return get_profile("default")
-    else:
-        raise ProfileNotFound(f"Unable to find any of the profiles: {', '.join(names)}")
+
+    raise ProfileNotFound(f"Unable to find any of the profiles: {', '.join(names)}")
 
 
 def get_profile(name: str) -> Profile:
@@ -286,9 +287,12 @@ def get_image_from_string(
     return image_class(filename=url.path, **kwargs)
 
 
-class BaseNoteCache:
-    note_cache: dict[str, "BaseNoteCache"] = {}
-    note_filename = None
+class BaseNoteCache(abc.ABC):
+    note_cache: ClassVar[dict[str, "BaseNoteCache"]] = {}
+
+    @abc.abstractclassmethod
+    def note_filename(cls):
+        raise NotImplementedError
 
     def __init__(self, filename):
         self.filename = filename
@@ -296,6 +300,7 @@ class BaseNoteCache:
         self.notes: dict[str, str] = {}
         self._read()
 
+    @abc.abstractmethod
     def _parse_line(self, line: str) -> tuple[str, Any]:
         raise NotImplementedError("Line parser not implemented")
 
@@ -307,7 +312,7 @@ class BaseNoteCache:
             logger.debug(f"Reading information from {self.filename}")
             with pelican_open(self.filename) as text:
                 for line_number, line in enumerate(text.splitlines()):
-                    line = line.strip()
+                    line = line.strip()  # noqa: PLW2901
 
                     # skip empty lines
                     if len(line) == 0:
@@ -326,10 +331,9 @@ class BaseNoteCache:
                             f" on line {line_number + 1}: {e}"
                         )
 
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 f"There was an error while processing the {self.filename}. "
-                f"Exception message: {e}"
             )
 
     def get_value(self, source_image):
@@ -364,15 +368,24 @@ class BaseNoteKeyValueCache(BaseNoteCache):
 
 
 class CaptionCache(BaseNoteKeyValueCache):
-    note_filename = "captions.txt"
+    @classmethod
+    @property
+    def note_filename(cls):
+        return "captions.txt"
 
 
 class ExifCache(BaseNoteKeyValueCache):
-    note_filename = "exif.txt"
+    @classmethod
+    @property
+    def note_filename(cls):
+        return "exif.txt"
 
 
 class ExcludeCache(BaseNoteKeyCache):
-    note_filename = "blacklist.txt"
+    @classmethod
+    @property
+    def note_filename(cls):
+        return "blacklist.txt"
 
 
 class BaseNote:
@@ -496,12 +509,14 @@ class ArticleImage(BaseImage):
         """Legacy support."""
         if index == 0:
             return self.file
-        elif index == 1:
+
+        if index == 1:
             return self.image.web_filename
-        elif index == 2:
+
+        if index == 2:
             return self.thumb.web_filename
-        else:
-            raise IndexError
+
+        raise IndexError
 
 
 class ContentImage(BaseImage):
@@ -584,7 +599,7 @@ class Gallery:
     - enqueue the images to be processed
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0912 -- too many branches
         self,
         content: Union[Article, Page],
         location_parsed,
@@ -653,10 +668,11 @@ class Gallery:
     def __getitem__(self, item):
         if item == 0:
             return self.title
-        elif item == 1:
+
+        if item == 1:
             return self.images
-        else:
-            raise IndexError
+
+        raise IndexError
 
 
 class GalleryImage(BaseImage):
@@ -713,18 +729,18 @@ class GalleryImage(BaseImage):
         """Legacy support."""
         if item == 0:
             return self.file
-        elif item == 1:
+
+        if item == 1:
             return self.image
-        elif item == 2:
+
+        if item == 2:
             return self.thumb
-        elif item == 3:
-            if self.exif is None:
-                return ""
-            return self.exif.value
-        elif item == 4:
-            if self.caption is None:
-                return ""
-            return self.caption.value
+
+        if item == 3:
+            return "" if self.exif is None else self.exif.value
+
+        if item == 4:
+            return "" if self.caption is None else self.caption.value
 
         raise IndexError
 
@@ -768,11 +784,14 @@ class GlobalImage(BaseImage):
 
 
 class Image:
-    """The main Image class to hold all information of the generated image and to process
+    """The main Image class.
+
+    This class holds all information of the generated image that is required to process
     the image.
+
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0912, PLR0913, PLR0915 -- this function does a _lot_
         self,
         src,
         dst,
@@ -859,7 +878,7 @@ class Image:
 
         for add_img_name, add_img_spec in additional_images.items():
             if not isinstance(add_img_spec, dict):
-                add_img_spec = {}
+                add_img_spec = {}  # noqa: PLW2901
 
             add_img_spec_combined = {}
             # We use some values from the parent as default
@@ -991,8 +1010,8 @@ class Image:
             self._load_result_info()
         if self._average_color:
             return "#{:02x}{:02x}{:02x}".format(*self._average_color)
-        else:
-            return None
+
+        return None
 
     @property
     def caption(self) -> Optional[Caption]:
@@ -1001,8 +1020,8 @@ class Image:
 
     @property
     def data(self) -> bytes:
-        fp = open(self.output_filename, "rb")
-        return fp.read()
+        with open(self.output_filename, "rb") as fp:
+            return fp.read()
 
     @property
     def data_base64(self) -> str:
@@ -1019,8 +1038,8 @@ class Image:
 
     @staticmethod
     def is_alpha(img: PILImage.Image) -> bool:
-        return (
-            bool(img.mode in ("RGBA", "LA") or img.mode == "P" and "transparency" in img.info)
+        return bool(
+            img.mode in ("RGBA", "LA") or img.mode == "P" and "transparency" in img.info
         )
 
     @property
@@ -1058,15 +1077,18 @@ class Image:
         return results
 
     def apply_result_info(self, info: dict[str, Any]):
-        """Apply the information from the result image if it has been processed in a
-        different process.
+        """Apply the information from the result image.
+
+        This occurs if it has been processed in a different process.
         """
         for name in self._result_info_allowed_names:
             if name in info:
                 setattr(self, name, info[name])
         self._result_info_loaded = True
 
-    def process(self) -> tuple[str, dict[str, Any]]:
+    def process(  # noqa: PLR0912, PLR0915 -- this function does a lot
+        self,
+    ) -> tuple[str, dict[str, Any]]:
         """Process the image."""
         process = multiprocessing.current_process()
         logger.info(
@@ -1093,7 +1115,7 @@ class Image:
                 # Copy the exif data if we want to keep it
                 try:
                     self.exif_result = piexif.load(image.info["exif"])
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 -- we are just warning here
                     logger.warning(
                         "There was an error reading exif data from"
                         f" '{self.source_image.filename}': {e}"
@@ -1150,7 +1172,7 @@ class Image:
                 self.exif_result.pop(piexif.ExifIFD.SceneType, None)
 
                 exif_data = piexif.dump(self.exif_result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- we are just warning here
                 logger.warning(
                     "There was an error dumping exif data for image "
                     f" '{self.output_filename}': {e}"
@@ -1326,9 +1348,9 @@ class Image:
                 watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
             ]
             mark_position = (
-                    mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
-                    mark_position[1] - text_size[1],
-                )
+                mark_position[0] - (text_size[0] // 2) + (mark_image_size[0] // 2),
+                mark_position[1] - text_size[1],
+            )
 
             if not self.is_alpha(mark_image):
                 mark_image = mark_image.convert("RGBA")
@@ -1390,7 +1412,7 @@ class SourceImage:
     """
 
     #: Dict to cache the source images, so we only have to process it once
-    image_cache: dict[str, "SourceImage"] = {}
+    image_cache: ClassVar[dict[str, "SourceImage"]] = {}
 
     def __init__(self, filename):
         #: filename of the image
@@ -1515,9 +1537,8 @@ def get_process_pool():
     return g_process_pool
 
 
-def initialized(pelican: Pelican):
+def initialized(pelican: Pelican):  # noqa: PLR0915
     """Initialize the default settings."""
-    global g_process_pool
     p = os.path.expanduser("~/Pictures")
     DEFAULT_CONFIG.setdefault("PHOTO_LIBRARY", p)
     DEFAULT_CONFIG.setdefault(
@@ -1710,8 +1731,11 @@ def initialized(pelican: Pelican):
 
 @measure_time
 def enqueue_image(img: Image) -> Image:
-    """Add the image to the resize list. If an image with the same destination filename
-    and the same specifications does already exist it will return this instead.
+    """Add the image to the resize list.
+
+    If an image with the same destination filename and the same specifications does
+    already exist it will return this instead.
+
     """
     if img.dst not in g_image_cache:
         g_image_cache[img.dst] = img
@@ -1745,15 +1769,15 @@ def build_license(license, author):
         return licenses[license]["Text"].format(
             Author=author, Year=year, URL=licenses[license]["URL"]
         )
-    else:
-        return f"Copyright {year} {author}, All Rights Reserved"
+
+    return f"Copyright {year} {author}, All Rights Reserved"
 
 
 def process_image_process_wrapper(image: Image):
-    """Wrapper to call an object function in the pool process."""
+    """Create a wrapper to call an object function in the pool process."""
     try:
         return image.process()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- we are just warning here
         logger.error(f"photos: {e}")
         logger.warning("photos: An exception occurred", exc_info=e)
 
@@ -1791,8 +1815,8 @@ def process_image_queue():
 
 
 @measure_time
-def detect_inline_images(content: pelican.contents.Content):
-    """Find images in the generated content and replace them with the processed images."""
+def detect_inline_images(content: pelican.contents.Content):  # noqa: PLR0912
+    """Find images in the generated content and replace them with the processed images."""  # noqa: E501
     regex = r"""
         <\s*
         (?P<tag>[^\s\>]+)  # detect the tag
@@ -1909,11 +1933,9 @@ def galleries_string_decompose(gallery_string) -> list[dict[str, Any]]:
             else:
                 gallery["title"] = DEFAULT_CONFIG["PHOTO_GALLERY_TITLE"]
         return galleries
-    else:
-        logger.error(
-            f"Unexpected gallery location format! \n{pprint.pformat(galleries)}"
-        )
-        return None
+
+    logger.error(f"Unexpected gallery location format! \n{pprint.pformat(galleries)}")
+    return []
 
 
 @measure_time
@@ -1932,9 +1954,9 @@ def process_content_galleries(
 
     galleries = galleries_string_decompose(location)
 
-    for gallery in galleries:
+    for gallery_name in galleries:
         try:
-            gallery = Gallery(content, gallery, profile_name=profile_name)
+            gallery = Gallery(content, gallery_name, profile_name=profile_name)
             photo_galleries.append(gallery)
         except GalleryNotFound as e:
             logger.error(f"photos: {e!s}")
@@ -2022,7 +2044,8 @@ def detect_meta_galleries(content: Union[Article, Page]):
 
 
 def detect_meta_images(content: pelican.contents.Content):
-    """Look for article or page photos specified in the meta data
+    """Look for article or page photos specified in the meta data.
+
     Find images in the generated content and replace them with the processed images.
     """
     image = content.metadata.get("image", None)
@@ -2302,7 +2325,7 @@ def handle_signal_all_generators_finalized(
 
 
 def register():
-    """Uses the new style of registration based on GitHub Pelican issue #314."""
+    """Use the new style of registration based on GitHub Pelican issue #314."""
     signals.initialized.connect(initialized)
     signals.generator_init.connect(handle_signal_generator_init)
     signals.content_object_init.connect(handle_signal_content_object_init)

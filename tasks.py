@@ -79,7 +79,9 @@ def setup(c):
         c.run(f"{CMD_PREFIX}python -m pip install --upgrade pip")
         c.run(f"{POETRY} install")
         precommit(c)
-        print("\nDevelopment environment should now be set up and ready!\n")
+        print(  # noqa: T201
+            "\nDevelopment environment should now be set up and ready!\n"
+        )
     else:
         error_message = """
             Poetry is not installed, and there is no active virtual environment available.
