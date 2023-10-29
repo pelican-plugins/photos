@@ -30,6 +30,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.pdm-python
+pdm.lock
 
 # Installer logs
 pip-log.txt
