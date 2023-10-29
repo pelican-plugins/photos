@@ -1343,7 +1343,7 @@ class Image:
                 if self._pelican_settings["PHOTO_WATERMARK_IMG_SIZE"]
                 else mark_image_size
             )
-            mark_image.thumbnail(mark_image_size, PILImage.ANTIALIAS)
+            mark_image.thumbnail(mark_image_size, PILImage.LANCZOS)
             mark_position = [
                 watermark_layer.size[i] - mark_image.size[i] - margin[i] for i in [0, 1]
             ]
