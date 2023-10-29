@@ -239,7 +239,7 @@ Add the following to the template `base.html`, before the closing HTML `</body>`
 ```JavaScript
 {% if (article and article.photo_gallery) or (articles_page and articles_page.object_list[0].photo_gallery) %}
 <!-- jQuery 1.7.2+ or Zepto.js 1.0+ -->
-<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
 
 <!-- Magnific Popup core JS file -->
 <script src="{{ SITEURL }}/{{ THEME_STATIC_DIR }}/magnific-popup.js"></script>

@@ -19,7 +19,7 @@ VENV_BIN = Path(VENV) / Path(BIN_DIR)
 POETRY = which("poetry") if which("poetry") else (VENV_BIN / "poetry")
 CMD_PREFIX = f"{VENV_BIN}/" if ACTIVE_VENV else f"{POETRY} run "
 PRECOMMIT = which("pre-commit") if which("pre-commit") else f"{CMD_PREFIX}pre-commit"
-PTY = True if os.name != "nt" else False
+PTY = os.name != "nt"
 
 
 @task
@@ -29,39 +29,34 @@ def tests(c):
 
 
 @task
-def black(c, check=False, diff=False):
-    """Run Black auto-formatter, optionally with `--check` or `--diff`."""
+def format(c, check=False, diff=False):
+    """Run Ruff's auto-formatter, optionally with `--check` or `--diff`."""
     check_flag, diff_flag = "", ""
     if check:
         check_flag = "--check"
     if diff:
         diff_flag = "--diff"
-    c.run(f"{CMD_PREFIX}black {check_flag} {diff_flag} {PKG_PATH} tasks.py")
+    c.run(
+        f"{CMD_PREFIX}ruff format {check_flag} {diff_flag} {PKG_PATH} tasks.py", pty=PTY
+    )
 
 
 @task
-def isort(c, check=False, diff=False):
-    """Ensure imports are sorted according to project standards."""
-    check_flag, diff_flag = "", ""
-    if check:
-        check_flag = "-c"
+def ruff(c, fix=False, diff=False):
+    """Run Ruff to ensure code meets project standards."""
+    diff_flag, fix_flag = "", ""
+    if fix:
+        fix_flag = "--fix"
     if diff:
         diff_flag = "--diff"
-    c.run(f"{CMD_PREFIX}isort {check_flag} {diff_flag} .")
+    c.run(f"{CMD_PREFIX}ruff check {diff_flag} {fix_flag} .", pty=PTY)
 
 
 @task
-def flake8(c):
-    """Check code for PEP8 compliance via Flake8."""
-    c.run(f"{CMD_PREFIX}flake8 {PKG_PATH} tasks.py")
-
-
-@task
-def lint(c, diff=False):
+def lint(c, fix=False, diff=False):
     """Check code style via linting tools."""
-    isort(c, check=True, diff=diff)
-    black(c, check=True, diff=diff)
-    flake8(c)
+    ruff(c, fix=fix, diff=diff)
+    format(c, check=(not fix), diff=diff)
 
 
 @task
@@ -86,7 +81,9 @@ def setup(c):
         c.run(f"{CMD_PREFIX}python -m pip install --upgrade pip")
         c.run(f"{POETRY} install")
         precommit(c)
-        print("\nDevelopment environment should now be set up and ready!\n")
+        print(  # noqa: T201
+            "\nDevelopment environment should now be set up and ready!\n"
+        )
     else:
         error_message = """
             Poetry is not installed, and there is no active virtual environment available.
