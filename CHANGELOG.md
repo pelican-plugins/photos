@@ -1,6 +1,16 @@
 CHANGELOG
 =========
 
+1.5.0 - 2023-10-30
+------------------
+
+* Improve speed by using a global process pool
+* Fix exclude list format issue
+* Catch exceptions while reading or writing EXIF data
+* Handle photos for which GPS data is not available
+* Handle missing galleries
+* Post-process JPEG images with RGB converter
+
 1.4.0 - 2022-09-08
 ------------------
 
