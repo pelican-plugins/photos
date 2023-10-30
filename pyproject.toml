@@ -116,6 +116,16 @@ combine-as-imports = true
 force-sort-within-sections = true
 known-first-party = ["pelican"]
 
+[tool.pdm]
+
+[tool.pdm.build]
+source-includes = [
+    "CONTRIBUTING.rst",
+    "examples/",
+]
+includes = ["pelican/"]
+excludes = ["**/test_data/**"]
+
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
