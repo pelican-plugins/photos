@@ -14,7 +14,7 @@ import os
 import pprint
 import re
 import time
-from typing import Any, ClassVar, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 from pelican import Pelican, signals
@@ -25,7 +25,7 @@ from pelican.settings import DEFAULT_CONFIG
 from pelican.utils import pelican_open
 
 logger = logging.getLogger(__name__)
-pelican_settings: dict[str, Any] = {}
+pelican_settings: Dict[str, Any] = {}
 pelican_output_path: Optional[str] = None
 pelican_photo_inline_galleries = {}
 g_generator = None
@@ -34,7 +34,7 @@ g_profiles = {}
 g_profiling_call_level = 0
 g_process_pool: Optional[multiprocessing.Pool] = None
 g_process_pool_initialized: bool = False
-g_image_cache: dict[str, "Image"] = {}
+g_image_cache: Dict[str, "Image"] = {}
 
 try:
     from PIL import (
@@ -123,14 +123,14 @@ class Profile:
     def __init__(
         self,
         name: str,
-        config: dict[str, Any],
+        config: Dict[str, Any],
         default_profile: Optional["Profile"] = None,
     ):
         self.name = name
         self._config = config
         self._default_profile = default_profile
 
-    def get_image_config(self, name) -> dict[str, Any]:
+    def get_image_config(self, name) -> Dict[str, Any]:
         images = self._config.get("images")
         config = None
         if images is not None:
@@ -166,11 +166,11 @@ class Profile:
         return self.get_image_config("article").get("file_suffix", "a")
 
     @property
-    def article_html_img_attributes(self) -> dict[str, str]:
+    def article_html_img_attributes(self) -> Dict[str, str]:
         return self.get_image_config("article").get("html_img_attributes", {})
 
     @property
-    def article_image_spec(self) -> dict[str, Any]:
+    def article_image_spec(self) -> Dict[str, Any]:
         return self.get_image_config("article")["specs"]
 
     @property
@@ -178,11 +178,11 @@ class Profile:
         return self.get_image_config("gallery").get("file_suffix", "")
 
     @property
-    def gallery_html_img_attributes(self) -> dict[str, str]:
+    def gallery_html_img_attributes(self) -> Dict[str, str]:
         return self.get_image_config("gallery").get("html_img_attributes", {})
 
     @property
-    def gallery_image_spec(self) -> dict[str, Any]:
+    def gallery_image_spec(self) -> Dict[str, Any]:
         return self.get_image_config("gallery")["specs"]
 
     @property
@@ -190,11 +190,11 @@ class Profile:
         return self.get_image_config("thumb").get("file_suffix", "t")
 
     @property
-    def thumb_html_img_attributes(self) -> dict[str, str]:
+    def thumb_html_img_attributes(self) -> Dict[str, str]:
         return self.get_image_config("thumb").get("html_img_attributes", {})
 
     @property
-    def thumb_image_spec(self) -> dict[str, Any]:
+    def thumb_image_spec(self) -> Dict[str, Any]:
         return self.get_image_config("thumb")["specs"]
 
 
@@ -234,7 +234,7 @@ def measure_time(func):
 
 
 @measure_time
-def find_profile(names: list[str], default_not_found=True):
+def find_profile(names: List[str], default_not_found=True):
     """Find first matching profile."""
     for name in names:
         try:
@@ -257,8 +257,8 @@ def get_profile(name: str) -> Profile:
 
 def get_image_from_string(
     url_string: str,
-    image_class: Optional[type["BaseImage"]] = None,
-    default_image_class: Optional[type["BaseImage"]] = None,
+    image_class: Optional[Type["BaseImage"]] = None,
+    default_image_class: Optional[Type["BaseImage"]] = None,
 ) -> "BaseImage":
     value_mapping = {
         "profile": "profile_name",
@@ -288,7 +288,7 @@ def get_image_from_string(
 
 
 class BaseNoteCache(abc.ABC):
-    note_cache: ClassVar[dict[str, "BaseNoteCache"]] = {}
+    note_cache: ClassVar[Dict[str, "BaseNoteCache"]] = {}
 
     @abc.abstractclassmethod
     def note_filename(cls):
@@ -297,11 +297,11 @@ class BaseNoteCache(abc.ABC):
     def __init__(self, filename):
         self.filename = filename
         self.note_cache[self.filename] = self
-        self.notes: dict[str, str] = {}
+        self.notes: Dict[str, str] = {}
         self._read()
 
     @abc.abstractmethod
-    def _parse_line(self, line: str) -> tuple[str, Any]:
+    def _parse_line(self, line: str) -> Tuple[str, Any]:
         raise NotImplementedError("Line parser not implemented")
 
     def _read(self):
@@ -342,7 +342,7 @@ class BaseNoteCache(abc.ABC):
     @classmethod
     def from_cache(cls, source_image: "SourceImage"):
         filename = os.path.join(
-            os.path.dirname(source_image.filename), cls.note_filename
+            os.path.dirname(source_image.filename), cls.note_filename()
         )
         notes = cls.note_cache.get(filename)
         if notes is None:
@@ -351,12 +351,12 @@ class BaseNoteCache(abc.ABC):
 
 
 class BaseNoteKeyCache(BaseNoteCache):
-    def _parse_line(self, line: str) -> tuple[str, bool]:
+    def _parse_line(self, line: str) -> Tuple[str, bool]:
         return line.strip(), True
 
 
 class BaseNoteKeyValueCache(BaseNoteCache):
-    def _parse_line(self, line: str) -> tuple[str, str]:
+    def _parse_line(self, line: str) -> Tuple[str, str]:
         # parse content
         m = line.split(":", 1)
         if len(m) > 1:
@@ -369,21 +369,18 @@ class BaseNoteKeyValueCache(BaseNoteCache):
 
 class CaptionCache(BaseNoteKeyValueCache):
     @classmethod
-    @property
     def note_filename(cls):
         return "captions.txt"
 
 
 class ExifCache(BaseNoteKeyValueCache):
     @classmethod
-    @property
     def note_filename(cls):
         return "exif.txt"
 
 
 class ExcludeCache(BaseNoteKeyCache):
     @classmethod
-    @property
     def note_filename(cls):
         return "blacklist.txt"
 
@@ -648,7 +645,7 @@ class Gallery:
             image_filenames.append(f"{location_parsed['type']}{image_filename}")
 
         self.dst_dir = os.path.join("photos", rel_gallery.lower())
-        self.images: list[GalleryImage] = []
+        self.images: List[GalleryImage] = []
 
         self.title = location_parsed["title"]
         for pic in image_filenames:
@@ -795,8 +792,8 @@ class Image:
         self,
         src,
         dst,
-        spec: Optional[dict[str, Any]] = None,
-        specs: Optional[dict[str, dict[str, Any]]] = None,
+        spec: Optional[Dict[str, Any]] = None,
+        specs: Optional[Dict[str, Dict[str, Any]]] = None,
         is_thumb=False,
     ):
         if spec is not None and specs is not None:
@@ -838,12 +835,12 @@ class Image:
                 spec = specs["default"]
 
         #: The specification how to transform the source image
-        self.spec: dict[str, Any] = spec.copy()
+        self.spec: Dict[str, Any] = spec.copy()
 
         #: Image type e.g. jpeg, webp
         self.type = spec["type"].lower()
 
-        image_options: dict[str, Any] = self._pelican_settings[
+        image_options: Dict[str, Any] = self._pelican_settings[
             "PHOTO_DEFAULT_IMAGE_OPTIONS"
         ].get(self.type)
         if image_options is None:
@@ -872,7 +869,7 @@ class Image:
             )
             self.srcset.append(enqueue_image(img))
 
-        additional_images: dict[str, Any] = spec.get("images")
+        additional_images: Dict[str, Any] = spec.get("images")
         if additional_images is None:
             additional_images = {}
 
@@ -912,9 +909,9 @@ class Image:
             ),
         )
 
-        self.pre_operations: list[Union[str, list, tuple]] = []
-        self.operations: list[Union[str, list, tuple]] = []
-        self.post_operations: list[Union[str, list, tuple]] = []
+        self.pre_operations: List[Union[str, list, tuple]] = []
+        self.operations: List[Union[str, list, tuple]] = []
+        self.post_operations: List[Union[str, list, tuple]] = []
 
         self.pre_operations.append("exif.rotate")
         self.pre_operations.append("exif.manipulate")
@@ -1076,7 +1073,7 @@ class Image:
         self._result_info_loaded = True
         return results
 
-    def apply_result_info(self, info: dict[str, Any]):
+    def apply_result_info(self, info: Dict[str, Any]):
         """Apply the information from the result image.
 
         This occurs if it has been processed in a different process.
@@ -1088,7 +1085,7 @@ class Image:
 
     def process(  # noqa: PLR0912, PLR0915 -- this function does a lot
         self,
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> Tuple[str, Dict[str, Any]]:
         """Process the image."""
         process = multiprocessing.current_process()
         logger.info(
@@ -1370,7 +1367,7 @@ class SrcSetImage(Image):
         self,
         src,
         dst,
-        spec: Optional[dict[str, Any]] = None,
+        spec: Optional[Dict[str, Any]] = None,
         is_thumb=False,
     ):
         self.descriptor = spec.get("srcset_descriptor", f"{spec['width']}w")
@@ -1412,7 +1409,7 @@ class SourceImage:
     """
 
     #: Dict to cache the source images, so we only have to process it once
-    image_cache: ClassVar[dict[str, "SourceImage"]] = {}
+    image_cache: ClassVar[Dict[str, "SourceImage"]] = {}
 
     def __init__(self, filename):
         #: filename of the image
@@ -1905,7 +1902,7 @@ def detect_inline_images(content: pelican.contents.Content):  # noqa: PLR0912
     return inline_images
 
 
-def galleries_string_decompose(gallery_string) -> list[dict[str, Any]]:
+def galleries_string_decompose(gallery_string) -> List[Dict[str, Any]]:
     splitter_regex = re.compile(r"[\s,]*?({photo}|{filename})")
     title_regex = re.compile(r"{(.+)}")
     galleries = map(
@@ -1941,7 +1938,7 @@ def process_content_galleries(
     content: Union[Article, Page],
     location,
     profile_name: Optional[str] = None,
-) -> list[Gallery]:
+) -> List[Gallery]:
     """Process all galleries attached to an article or page.
 
     :param content: The content object
@@ -2273,7 +2270,7 @@ def handle_signal_content_object_init(content: pelican.contents.Content):
 
 @measure_time
 def handle_signal_all_generators_finalized(
-    generators: list[pelican.generators.Generator],
+    generators: List[pelican.generators.Generator],
 ):
     global_images = {}
     for name, config in pelican_settings["PHOTO_GLOBAL_IMAGES"].items():
@@ -2290,7 +2287,7 @@ def handle_signal_all_generators_finalized(
     for generator in generators:
         if isinstance(generator, ArticlesGenerator):
             article: Article
-            article_lists: list[list[Article]] = [
+            article_lists: List[List[Article]] = [
                 generator.articles,
                 generator.translations,
                 generator.drafts,
