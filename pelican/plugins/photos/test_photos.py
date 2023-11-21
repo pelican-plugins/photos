@@ -24,6 +24,8 @@ class TestPhotos(unittest.TestCase):
         cls.settings["OUTPUT_PATH"] = cls.temp_path
         cls.settings["SITEURL"] = "http://getpelican.com/sub"
         cls.settings["AUTHOR"] = "Bob Anonymous"
+        cls.settings["PHOTO_WATERMARK_TEXT"] = "watermark text"
+        cls.settings["PHOTO_WATERMARK"] = True
         cls.output_path = cls.settings["OUTPUT_PATH"]
         photos.initialized(cls)
 
