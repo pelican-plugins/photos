@@ -1319,9 +1319,10 @@ class Image:
             font = ImageFont.FreeTypeFont(
                 default_font, watermark_layer.size[0] // text_reducer
             )
-            text_size = draw_watermark.textsize(
-                self._pelican_settings["PHOTO_WATERMARK_TEXT"], font
+            text_size[0] = draw_watermark.textlength(
+                self._pelican_settings["PHOTO_WATERMARK_TEXT"], font, direction="rtl"
             )
+            text_size[1] = font.size
             text_position = [image.size[i] - text_size[i] - margin[i] for i in [0, 1]]
             draw_watermark.text(
                 text_position,
