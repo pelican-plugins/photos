@@ -2138,6 +2138,7 @@ def replace_inline_galleries(content, inline_galleries):
         )
         template_values = {
             "galleries": galleries,
+            "SITEURL": pelican_settings["SITEURL"],
         }
         if isinstance(content, Article):
             template_values["article"] = content
