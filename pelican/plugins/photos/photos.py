@@ -1309,16 +1309,20 @@ class Image:
         image_reducer = 8
         text_size = [0, 0]
         mark_size = [0, 0]
-        text_position = [0, 0]
 
         if self._pelican_settings["PHOTO_WATERMARK_TEXT"]:
             font_name = "SourceCodePro-Bold.otf"
             default_font = os.path.join(
                 os.path.dirname(os.path.realpath(__file__)), font_name
             )
-            font = ImageFont.FreeTypeFont(
-                default_font, watermark_layer.size[0] // text_reducer
-            )
+            font_size = watermark_layer.size[0] // text_reducer
+            if font_size < 1:
+                logger.info(
+                    f"photos: font size {font_size} is to small skipping watermark"
+                )
+                return image
+
+            font = ImageFont.FreeTypeFont(font=default_font, size=font_size)
             text_size[0] = draw_watermark.textlength(
                 self._pelican_settings["PHOTO_WATERMARK_TEXT"], font, direction="rtl"
             )
