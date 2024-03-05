@@ -149,7 +149,10 @@ class Profile:
             tpl_name = default_template_name
         if tpl_name is None:
             logger.error("Unable to find template for profile")
-        return g_generator.get_template(tpl_name).render(**kwargs)
+
+        context_vars = {"SITEURL": pelican_settings["SITEURL"]}
+        context_vars.update(kwargs)
+        return g_generator.get_template(tpl_name).render(**context_vars)
 
     @property
     def file_suffix(self) -> str:
