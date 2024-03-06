@@ -21,6 +21,8 @@ DEFAULT_LANG = "en"
 # Base settings where to find the galleries with images
 PHOTO_LIBRARY = "content/galleries"
 
+PHOTO_INLINE_ENABLED = True
+
 PHOTO_INLINE_GALLERY_ENABLED = True
 # We use the default settings here
 # PHOTO_INLINE_GALLERY_TEMPLATE = "inline_gallery"

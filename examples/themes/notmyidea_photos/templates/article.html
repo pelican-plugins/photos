@@ -35,16 +35,15 @@
       {{ article.content }}
       {% if article.photo_gallery %}
       <!-- >>>> Start >>>>> PHOTO plugin: article gallery >>>>>>>>> -->
-      {% if article.photo_gallery %}
       <div class="gallery">
-          {% for title, gallery in article.photo_gallery %}
-            <h1>{{ title }}</h1>
-              {% for name, photo, thumb, exif, caption in gallery %}
-                  <a href="{{ SITEURL }}/{{ photo }}" title="{{ name }}" exif="{{ exif }}" caption="{{ caption }}"><img src="{{ SITEURL }}/{{ thumb }}"></a>
-              {% endfor %}
-          {% endfor %}
+        {% import "photos_macros.html" as photos_macros %}
+
+        <div class="gallery">
+            {% for title, gallery in article.photo_gallery %}
+                {{ photos_macros.gallery(title, gallery, 'Default caption') }}
+            {% endfor %}
+        </div>
       </div>
-      {% endif %}
       <!-- <<<< End <<<<< PHOTO plugin: article gallery <<<<<<<<< -->
       {% endif %}
     </div><!-- /.entry-content -->

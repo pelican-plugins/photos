@@ -1,0 +1,13 @@
+<!-- >>>> Start >>>>> PHOTO plugin: inline_image template >>>>>>>>> -->
+<figure>
+    <img
+        src="{{ SITEURL }}/{{ image.image }}"
+        alt="{{ image.caption | default(html_attributes.caption, true) | e }}"
+        height="{{ image.image.height }}"
+        width="{{ image.image.width }}"
+        {% if image.image.srcset.html_srcset %}srcset="{{ image.image.srcset.html_srcset }}"{% endif %}
+        loading="lazy"
+    />
+    <figcaption>{{ html_attributes.caption | default(image.caption, true) | e }}</figcaption>
+</figure>
+<!-- <<<< End <<<<< PHOTO plugin: inline_image template <<<<<<<<< -->

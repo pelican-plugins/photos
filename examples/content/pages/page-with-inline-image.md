@@ -1,6 +1,4 @@
-Title: Article with inline image
-Date: 2022-01-06
-Category: Photo
+Title: Page with inline image
 Summary: This is an example with an inline image.
 
 ## Use inline images
