@@ -1,0 +1,18 @@
+{% macro gallery(title, gallery, default_caption) -%}
+<div class="gallery">
+    {% if title | trim %}<h2>{{ title }}</h2>{% endif %}
+    {% for name, photo, thumb, exif, caption in gallery %}
+        <a href="{{ SITEURL }}/{{ photo }}" title="{{ caption|default(default_caption, true)|e }}">
+            <img
+                src="{{ SITEURL }}/{{ thumb }}"
+                alt="{{ caption | default(default_caption, true)|e }}"
+                height="{{ thumb.height }}"
+                width="{{ thumb.width }}"
+                {% if thumb.srcset.html_srcset %}srcset="{{ thumb.srcset.html_srcset }}"{% endif %}
+                sizes="(max-width: 768px) 50vw, 33vw"
+                loading="lazy"
+            />
+        </a>
+    {% endfor %}
+</div>
+{% endmacro -%}

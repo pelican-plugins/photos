@@ -14,6 +14,23 @@
     <h1 class="entry-title">{{ page.title }}</h1>
     {% import 'translations.html' as translations with context %}
     {{ translations.translations_for(page) }}
+    <!-- >>>> Start >>>>> PHOTO plugin: page image >>>>>>>>> -->
+    {% if page.photo_image %}
+    <img src="{{ SITEURL }}/{{ page.photo_image[1] }}" />
+    {% endif %}
+    <!-- <<<< End <<<<< PHOTO plugin: page image <<<<<<<<< -->
     {{ page.content }}
+    {% if page.photo_gallery %}
+    <!-- >>>> Start >>>>> PHOTO plugin: page gallery >>>>>>>>> -->
+    <div class="gallery">
+        {% import "photos_macros.html" as photos_macros %}
+        <div class="gallery">
+            {% for title, gallery in page.photo_gallery %}
+                {{ photos_macros.gallery(title, gallery, 'Default caption') }}
+            {% endfor %}
+        </div>
+    </div>
+    <!-- <<<< End <<<<< PHOTO plugin: page gallery <<<<<<<<< -->
+{% endif %}
 </section>
 {% endblock %}

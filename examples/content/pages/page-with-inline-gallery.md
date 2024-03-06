@@ -1,6 +1,4 @@
-Title: Article with inline Gallery
-Date: 2022-01-04
-Category: Gallery
+Title: Page with inline Gallery
 Summary: This is an example with an inline gallery.
 
 **If you don't see a gallery here, you have to enable inline galleries**

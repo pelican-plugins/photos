@@ -1,6 +1,4 @@
-Title: Article with Gallery
-Date: 2022-01-03
-Category: Gallery
+Title: Page with Gallery
 Gallery: {photo}example_gallery/
 Summary: This is an example with an image gallery.
 

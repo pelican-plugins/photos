@@ -1,10 +1,9 @@
-<!-- >>>> Start >>>>> PHOTO plugin: inline gallery >>>>>>>>> -->
+<!-- >>>> Start >>>>> PHOTO plugin: inline_gallery template >>>>>>>>> -->
+{% import "photos_macros.html" as photos_macros %}
+
 <div class="gallery">
-    {% for title, gallery in galleries%}
-        <h1>{{ title }}</h1>
-            {% for name, photo, thumb, exif, caption in gallery %}
-                    <a href="{{ SITEURL }}/{{ photo }}" title="{{ name }}" exif="{{ exif }}" caption="{{ caption }}"><img src="{{ SITEURL }}/{{ thumb }}"></a>
-            {% endfor %}
+    {% for title, gallery in galleries %}
+        {{ photos_macros.gallery(title, gallery, 'Default caption') }}
     {% endfor %}
 </div>
-<!-- <<<< End <<<<< PHOTO plugin: inline gallery <<<<<<<<< -->
+<!-- <<<< End <<<<< PHOTO plugin: inline_gallery template <<<<<<<<< -->
