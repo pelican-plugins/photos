@@ -1750,7 +1750,7 @@ def enqueue_image(img: Image) -> Image:
         or g_image_cache[img.dst].spec != img.spec
     ):
         raise InternalError(
-            "resize conflict for {}, {}-{} is not {}-{}".format(
+            "Resize conflict for {}, {}-{} is not {}-{}".format(  # noqa: UP032
                 img.dst,
                 g_image_cache[img.dst].source_image.filename,
                 g_image_cache[img.dst].spec,
@@ -2169,7 +2169,7 @@ def replace_inline_images(content, inline_images):
         html_img_attributes = profile.thumb_html_img_attributes
         if html_img_attributes:
             for prof_attr_name, prof_attr_value in html_img_attributes.items():
-                extra_attributes += ' {}="{}"'.format(
+                extra_attributes += ' {}="{}"'.format(  # noqa: UP032
                     prof_attr_name, prof_attr_value.format(i=image)
                 )
 
