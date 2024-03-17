@@ -1,6 +1,15 @@
 CHANGELOG
 =========
 
+1.6.0 - 2024-03-17
+------------------
+
+* Fix issue with Pillow 10.1+
+* Fix issue with font size to small
+* Add SITEURL to template context
+* Add more examples
+* Update CI pipeline
+
 1.5.0 - 2023-10-30
 ------------------
 
