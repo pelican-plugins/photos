@@ -38,7 +38,7 @@ dependencies = [
 "Funding" = "https://donate.getpelican.com/"
 "Issue Tracker" = "https://github.com/pelican-plugins/photos/issues"
 
-[project.optional_dependencies]
+[project.optional-dependencies]
 markdown = [
     "markdown"
 ]
