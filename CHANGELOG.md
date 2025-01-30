@@ -1,6 +1,14 @@
 CHANGELOG
 =========
 
+1.6.1 - 2025-01-30
+------------------
+
+* Update dependencies
+
+Contributed by [PhiBo](https://github.com/phibos) via [PR #128](https://github.com/pelican-plugins/photos/pull/128/)
+
+
 1.6.0 - 2024-03-17
 ------------------
 
