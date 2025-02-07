@@ -1282,6 +1282,8 @@ class Image:
         """Remove the alpha channel."""
         if not self.is_alpha(image):
             return image
+        if image.mode == "P":
+            image = image.convert("RGBA")
         background = PILImage.new(
             "RGB", image.size, self._pelican_settings["PHOTO_ALPHA_BACKGROUND_COLOR"]
         )
