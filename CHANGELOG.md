@@ -1,6 +1,15 @@
 CHANGELOG
 =========
 
+1.6.2 - 2025-02-07
+------------------
+
+* Convert p image to remove transparency
+* Improve support for i18n_subsites
+
+Contributed by [PhiBo](https://github.com/phibos) via [PR #131](https://github.com/pelican-plugins/photos/pull/131/)
+
+
 1.6.1 - 2025-01-30
 ------------------
 
