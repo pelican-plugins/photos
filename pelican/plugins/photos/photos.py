@@ -1708,7 +1708,8 @@ def initialized(pelican: Pelican):  # noqa: PLR0915
     global pelican_settings
     pelican_settings = pelican.settings
     global pelican_output_path
-    pelican_output_path = pelican.output_path
+    if pelican_output_path is None:
+        pelican_output_path = pelican.output_path
     global g_profiles
     g_profiles = {}
     default_profile = Profile(
