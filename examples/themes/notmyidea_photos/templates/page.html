@@ -23,7 +23,7 @@
     {% if page.photo_gallery %}
     <!-- >>>> Start >>>>> PHOTO plugin: page gallery >>>>>>>>> -->
     <div class="gallery">
-        {% import "photos_macros.html" as photos_macros %}
+        {% import "photos_macros.html" as photos_macros with context %}
         <div class="gallery">
             {% for title, gallery in page.photo_gallery %}
                 {{ photos_macros.gallery(title, gallery, 'Default caption') }}

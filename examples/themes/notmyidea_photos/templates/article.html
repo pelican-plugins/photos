@@ -36,7 +36,7 @@
       {% if article.photo_gallery %}
       <!-- >>>> Start >>>>> PHOTO plugin: article gallery >>>>>>>>> -->
       <div class="gallery">
-        {% import "photos_macros.html" as photos_macros %}
+        {% import "photos_macros.html" as photos_macros with context %}
 
         <div class="gallery">
             {% for title, gallery in article.photo_gallery %}
